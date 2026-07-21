@@ -448,8 +448,20 @@ const PORT = 3000;
 // Apply payload compression to drastically reduce asset size and boost PageSpeed performance
 app.use(compression());
 
-// Setup security headers & caching policies
+// Setup security headers, CORS & caching policies
 app.use((req, res, next) => {
+  // Setup CORS to allow the frontend to communicate with the backend
+  const origin = req.headers.origin || "*";
+  res.setHeader("Access-Control-Allow-Origin", origin);
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+
+  if (req.method === "OPTIONS") {
+    res.sendStatus(204);
+    return;
+  }
+
   // Prevent MIME sniffing
   res.setHeader("X-Content-Type-Options", "nosniff");
   // Cross-site scripting protection

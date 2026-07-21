@@ -116,11 +116,13 @@ export default function SupportChat({ currentLanguage, currentUser, onClose }: S
   const [ratingComment, setRatingComment] = useState('');
   const [ratingSubmitted, setRatingSubmitted] = useState(false);
   const [socketConnected, setSocketConnected] = useState(false);
+  const [isSending, setIsSending] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const sendingRef = useRef(false);
 
   // persist messages
   const persistMessages = useCallback((msgs: ChatMessage[]) => {
@@ -130,7 +132,18 @@ export default function SupportChat({ currentLanguage, currentUser, onClose }: S
   const addMessage = useCallback((msg: ChatMessage) => {
     setMessages(prev => {
       if (prev.some(m => m.id === msg.id)) return prev;
-      const next = [...prev, msg].sort((a, b) => a.timestamp - b.timestamp);
+      let next = [...prev];
+      if (msg.sender === 'user' && !msg.id.startsWith('temp-')) {
+        const tempIdx = next.findIndex(m => m.sender === 'user' && m.id.startsWith('temp-'));
+        if (tempIdx !== -1) {
+          next[tempIdx] = msg;
+        } else {
+          next.push(msg);
+        }
+      } else {
+        next.push(msg);
+      }
+      next.sort((a, b) => a.timestamp - b.timestamp);
       persistMessages(next);
       return next;
     });
@@ -304,7 +317,11 @@ export default function SupportChat({ currentLanguage, currentUser, onClose }: S
   // ─── Send Message ───────────────────────────────────────────────────────────
   const sendMessage = async (text: string, e?: React.FormEvent, audioFile?: { name: string; base64: string; type: string }) => {
     if (e) e.preventDefault();
+    if (isSending || sendingRef.current) return;
     if (!text.trim() && !selectedFile && !audioFile) return;
+
+    sendingRef.current = true;
+    setIsSending(true);
 
     const ua = navigator.userAgent;
     const device = /Mobi|Android/i.test(ua) ? 'Mobile' : 'Desktop';
@@ -326,7 +343,12 @@ export default function SupportChat({ currentLanguage, currentUser, onClose }: S
         const data = await res.json();
         uploadedUrl = data.url;
         uploadType = 'audio';
-      } catch { console.error('Audio upload failed'); return; }
+      } catch { 
+        console.error('Audio upload failed'); 
+        setIsSending(false); 
+        sendingRef.current = false;
+        return; 
+      }
     } else if (selectedFile) {
       try {
         const res = await fetch('/api/support/upload', {
@@ -337,7 +359,12 @@ export default function SupportChat({ currentLanguage, currentUser, onClose }: S
         const data = await res.json();
         uploadedUrl = data.url;
         uploadType = selectedFile.type.startsWith('image/') ? 'image' : 'file';
-      } catch { console.error('File upload failed'); return; }
+      } catch { 
+        console.error('File upload failed'); 
+        setIsSending(false); 
+        sendingRef.current = false;
+        return; 
+      }
     }
 
     // Optimistic UI update
@@ -358,42 +385,54 @@ export default function SupportChat({ currentLanguage, currentUser, onClose }: S
     // Show AI typing indicator
     if (convStatus === 'AI_HANDLING') setIsAiTyping(true);
 
-    // Emit via socket
-    socket.emit('send_message', {
-      sessionId: conversationId,
-      sender: 'user',
-      text: text,
-      attachment: uploadedUrl ? { url: uploadedUrl, type: uploadType } : undefined,
-      clientName: currentUser?.name || guestName || (isRtl ? 'عميل زائر' : 'Guest'),
-      clientEmail: currentUser?.email || conversationId,
-      clientPhone: currentUser?.phone || '',
-      country,
-      language: currentLanguage,
-      device,
-      os,
-      browser
-    });
-
-    // Also call REST API as fallback
-    try {
-      await fetch(`/api/support/conversations/${encodeURIComponent(conversationId)}/message`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: text,
-          sender: 'user',
-          attachment: uploadedUrl ? { url: uploadedUrl, type: uploadType } : undefined,
-          clientName: currentUser?.name || guestName || (isRtl ? 'عميل زائر' : 'Guest'),
-          clientEmail: currentUser?.email || conversationId,
-          clientPhone: currentUser?.phone || '',
-          country,
-          language: currentLanguage,
-          device,
-          os,
-          browser
-        })
+    if (socketConnected) {
+      // Emit via socket ONLY
+      socket.emit('send_message', {
+        sessionId: conversationId,
+        sender: 'user',
+        text: text,
+        attachment: uploadedUrl ? { url: uploadedUrl, type: uploadType } : undefined,
+        clientName: currentUser?.name || guestName || (isRtl ? 'عميل زائر' : 'Guest'),
+        clientEmail: currentUser?.email || conversationId,
+        clientPhone: currentUser?.phone || '',
+        country,
+        language: currentLanguage,
+        device,
+        os,
+        browser
       });
-    } catch { setIsAiTyping(false); }
+      // Unlock after safety delay to prevent double-sends or double-clicks
+      setTimeout(() => {
+        setIsSending(false);
+        sendingRef.current = false;
+      }, 800);
+    } else {
+      // Also call REST API ONLY as fallback if socket is offline
+      try {
+        await fetch(`/api/support/conversations/${encodeURIComponent(conversationId)}/message`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: text,
+            sender: 'user',
+            attachment: uploadedUrl ? { url: uploadedUrl, type: uploadType } : undefined,
+            clientName: currentUser?.name || guestName || (isRtl ? 'عميل زائر' : 'Guest'),
+            clientEmail: currentUser?.email || conversationId,
+            clientPhone: currentUser?.phone || '',
+            country,
+            language: currentLanguage,
+            device,
+            os,
+            browser
+          })
+        });
+      } catch {
+        setIsAiTyping(false);
+      } finally {
+        setIsSending(false);
+        sendingRef.current = false;
+      }
+    }
   };
 
   // ─── Submit Rating ──────────────────────────────────────────────────────────
@@ -547,8 +586,9 @@ export default function SupportChat({ currentLanguage, currentUser, onClose }: S
               <div className="grid grid-cols-2 gap-2">
                 {activeSuggestions.map(s => (
                   <button key={s.id} type="button"
+                    disabled={isSending}
                     onClick={() => sendMessage(isRtl ? s.textAr : s.textEn)}
-                    className="p-3 bg-white dark:bg-[#11141D] hover:bg-sky-50 dark:hover:bg-sky-900/20 border border-slate-200 dark:border-slate-800 hover:border-sky-400 text-slate-700 dark:text-slate-300 text-xs font-bold rounded-2xl transition-all cursor-pointer text-center shadow-sm">
+                    className="p-3 bg-white dark:bg-[#11141D] hover:bg-sky-50 dark:hover:bg-sky-900/20 border border-slate-200 dark:border-slate-800 hover:border-sky-400 text-slate-700 dark:text-slate-300 text-xs font-bold rounded-2xl transition-all cursor-pointer text-center shadow-sm disabled:opacity-40 disabled:cursor-not-allowed">
                     {isRtl ? s.textAr : s.textEn}
                   </button>
                 ))}
@@ -660,8 +700,9 @@ export default function SupportChat({ currentLanguage, currentUser, onClose }: S
             <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-0.5">
               {activeSuggestions.slice(0, 4).map(s => (
                 <button key={s.id} type="button"
+                  disabled={isSending}
                   onClick={() => sendMessage(isRtl ? s.textAr : s.textEn)}
-                  className="whitespace-nowrap px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-sky-500/10 hover:border-sky-400 border border-transparent text-slate-600 dark:text-slate-400 text-[11px] font-bold rounded-xl transition-all cursor-pointer flex-shrink-0">
+                  className="whitespace-nowrap px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-sky-500/10 hover:border-sky-400 border border-transparent text-slate-600 dark:text-slate-400 text-[11px] font-bold rounded-xl transition-all cursor-pointer flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed">
                   {isRtl ? s.textAr : s.textEn}
                 </button>
               ))}
@@ -743,12 +784,12 @@ export default function SupportChat({ currentLanguage, currentUser, onClose }: S
                 onChange={e => setInputText(e.target.value)}
                 onKeyDown={() => socket.emit('typing', { sessionId: conversationId, sender: 'user', isTyping: true })}
                 placeholder={isRtl ? 'اكتب رسالتك هنا...' : 'Type your message here...'}
-                disabled={convStatus === 'QUEUED_FOR_HUMAN'}
+                disabled={convStatus === 'QUEUED_FOR_HUMAN' || isSending}
                 className={`flex-1 px-4 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 focus:border-sky-400 rounded-xl text-sm text-slate-800 dark:text-white outline-none transition-all font-medium ${isRtl ? 'text-right' : 'text-left'} disabled:opacity-50`}
               />
 
               <button type="submit"
-                disabled={(!inputText.trim() && !selectedFile) || convStatus === 'QUEUED_FOR_HUMAN'}
+                disabled={(!inputText.trim() && !selectedFile) || convStatus === 'QUEUED_FOR_HUMAN' || isSending}
                 className="p-2.5 bg-gradient-to-r from-sky-500 to-violet-600 hover:from-sky-400 hover:to-violet-500 disabled:from-slate-200 disabled:to-slate-300 dark:disabled:from-slate-800 dark:disabled:to-slate-700 text-white disabled:text-slate-400 rounded-xl transition-all cursor-pointer flex-shrink-0 shadow-md hover:shadow-sky-500/30 active:scale-95 disabled:cursor-not-allowed">
                 <Send className={`w-4 h-4 ${isRtl ? 'rotate-180' : ''}`} />
               </button>

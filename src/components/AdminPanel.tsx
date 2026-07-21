@@ -52,6 +52,16 @@ import {
 } from 'lucide-react';
 import ProfitReports from './ProfitReports';
 import ProductResearchCenter from './ProductResearchCenter';
+import {
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend
+} from 'recharts';
 
 // Interactive text helper that matches URLs and promo codes, making them clickable or copyable
 function renderInteractiveText(
@@ -5436,6 +5446,174 @@ export default function AdminPanel({
           </div>
         )}
 
+        {/* NEW PANEL: 7-DAY ORDERS STATISTICS DASHBOARD CARD */}
+        {adminTab === 'analytics' && (
+          <div className="bg-white dark:bg-[#131b2e] rounded-3xl p-6 sm:p-8 border border-slate-100 dark:border-slate-200/80 shadow-sm text-left mb-8 animate-in zoom-in-95 duration-200">
+            <h3 className="font-extrabold text-sm uppercase tracking-wider text-indigo-500 border-b border-slate-100 dark:border-slate-200 pb-3 mb-6 flex items-center gap-1.5">
+              <ShoppingBag className="w-4 h-4 text-indigo-500" />
+              <span>
+                {currentLanguage === 'ar'
+                  ? 'إحصائيات الطلبات الإجمالية (آخر 7 أيام)'
+                  : 'Total Orders Statistics (Last 7 Days)'}
+              </span>
+            </h3>
+            
+            {/* Calculation details */}
+            {(() => {
+              // Generate last 7 days list chronologically
+              const last7DaysData = Array.from({ length: 7 }).map((_, idx) => {
+                const d = new Date();
+                d.setDate(d.getDate() - idx);
+                const year = d.getFullYear();
+                const month = String(d.getMonth() + 1).padStart(2, '0');
+                const day = String(d.getDate()).padStart(2, '0');
+                const dateKey = `${year}-${month}-${day}`;
+                
+                const formattedDay = d.toLocaleDateString(currentLanguage === 'ar' ? 'ar-SA' : 'en-US', { weekday: 'short', month: 'numeric', day: 'numeric' });
+                return {
+                  dateKey,
+                  label: formattedDay,
+                  ordersCount: 0,
+                  totalRevenue: 0,
+                };
+              }).reverse();
+
+              // Populate data from orders
+              let totalOrdersLast7Days = 0;
+              let totalRevenueLast7Days = 0;
+              let peakDayLabel = '-';
+              let peakDayCount = 0;
+
+              orders.forEach(order => {
+                if (!order.date) return;
+                try {
+                  const oDate = new Date(order.date);
+                  if (isNaN(oDate.getTime())) return;
+                  const year = oDate.getFullYear();
+                  const month = String(oDate.getMonth() + 1).padStart(2, '0');
+                  const day = String(oDate.getDate()).padStart(2, '0');
+                  const oDateKey = `${year}-${month}-${day}`;
+
+                  const found = last7DaysData.find(item => item.dateKey === oDateKey);
+                  if (found) {
+                    found.ordersCount += 1;
+                    found.totalRevenue += order.total || 0;
+                    totalOrdersLast7Days += 1;
+                    totalRevenueLast7Days += order.total || 0;
+                  }
+                } catch (e) {
+                  console.error(e);
+                }
+              });
+
+              // Calculate peak day
+              last7DaysData.forEach(day => {
+                if (day.ordersCount > peakDayCount) {
+                  peakDayCount = day.ordersCount;
+                  peakDayLabel = day.label;
+                }
+              });
+
+              return (
+                <div className="space-y-6">
+                  <p className="text-xs text-slate-450 leading-relaxed font-sans max-w-xl">
+                    {currentLanguage === 'ar'
+                      ? 'مخطط بياني خطي يعرض حركة الطلبات اليومية المحققة ومستويات التفاعل الإجمالية على مدار السبعة أيام الماضية.'
+                      : 'Line chart visualization tracking real-time daily order volume and total conversion trends over the past rolling 7-day period.'}
+                  </p>
+
+                  {/* Summary Cards Grid */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+                    <div className="bg-indigo-50/25 dark:bg-indigo-950/10 p-5 rounded-2xl border border-indigo-100/50 text-right sm:text-left">
+                      <span className="text-[10px] font-black uppercase text-indigo-400">
+                        {currentLanguage === 'ar' ? 'إجمالي الطلبات (7 أيام)' : 'Total Orders (7 Days)'}
+                      </span>
+                      <div className="text-xl font-black text-indigo-600 dark:text-indigo-400 mt-1 flex items-baseline gap-1 justify-end sm:justify-start">
+                        <span>{totalOrdersLast7Days}</span>
+                        <span className="text-xs font-semibold text-slate-450"> {currentLanguage === 'ar' ? 'طلب' : 'orders'}</span>
+                      </div>
+                    </div>
+                    <div className="bg-emerald-50/25 dark:bg-emerald-950/10 p-5 rounded-2xl border border-emerald-100/50 text-right sm:text-left">
+                      <span className="text-[10px] font-black uppercase text-emerald-400">
+                        {currentLanguage === 'ar' ? 'عائدات المبيعات (7 أيام)' : 'Revenue (7 Days)'}
+                      </span>
+                      <div className="text-xl font-black text-emerald-600 dark:text-emerald-400 mt-1 flex items-baseline gap-1 justify-end sm:justify-start">
+                        <span>{totalRevenueLast7Days.toLocaleString()}</span>
+                        <span className="text-xs font-semibold text-slate-450"> SAR</span>
+                      </div>
+                    </div>
+                    <div className="bg-amber-50/25 dark:bg-amber-950/10 p-5 rounded-2xl border border-amber-100/50 text-right sm:text-left">
+                      <span className="text-[10px] font-black uppercase text-amber-400">
+                        {currentLanguage === 'ar' ? 'يوم الذروة' : 'Peak Day'}
+                      </span>
+                      <div className="text-xl font-black text-amber-600 dark:text-amber-400 mt-1 flex items-baseline gap-1 justify-end sm:justify-start">
+                        <span>{peakDayCount > 0 ? peakDayLabel : '-'}</span>
+                        {peakDayCount > 0 && (
+                          <span className="text-xs font-semibold text-slate-450"> ({peakDayCount} {currentLanguage === 'ar' ? 'طلب' : 'orders'})</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Recharts Line Chart Container */}
+                  <div className="bg-slate-50 dark:bg-[#0c121e] rounded-2xl p-4 sm:p-6 border border-slate-100 dark:border-slate-850 h-72 w-full font-sans">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart
+                        data={last7DaysData}
+                        margin={{ top: 10, right: 10, left: -25, bottom: 0 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" opacity={0.15} vertical={false} />
+                        <XAxis 
+                          dataKey="label" 
+                          stroke="#94a3b8" 
+                          fontSize={10} 
+                          fontWeight="bold"
+                          tickLine={false}
+                          axisLine={false}
+                          dy={10}
+                        />
+                        <YAxis 
+                          stroke="#94a3b8" 
+                          fontSize={10} 
+                          fontWeight="bold"
+                          tickLine={false}
+                          axisLine={false}
+                          allowDecimals={false}
+                          dx={-5}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                            borderColor: '#3b82f6',
+                            borderRadius: '12px',
+                            color: '#fff',
+                            fontSize: '11px',
+                            fontWeight: 'bold',
+                            textAlign: currentLanguage === 'ar' ? 'right' : 'left',
+                            direction: currentLanguage === 'ar' ? 'rtl' : 'ltr',
+                            fontFamily: 'Inter, sans-serif'
+                          }}
+                          labelStyle={{ color: '#94a3b8', marginBottom: '4px' }}
+                          itemStyle={{ color: '#3b82f6' }}
+                        />
+                        <Line
+                          name={currentLanguage === 'ar' ? 'الالطلبات' : 'Orders'}
+                          type="monotone"
+                          dataKey="ordersCount"
+                          stroke="#6366f1"
+                          strokeWidth={4}
+                          activeDot={{ r: 8, strokeWidth: 0, fill: '#818cf8' }}
+                          dot={{ r: 4, strokeWidth: 2, fill: '#fff', stroke: '#6366f1' }}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
         {/* PANEL C: KPI SALES ANALYTICS CHART */}
         {adminTab === 'analytics' && (
           <div className="bg-white dark:bg-[#131b2e] rounded-3xl p-6 sm:p-8 border border-slate-100 dark:border-slate-200/80 shadow-sm text-left animate-in zoom-in-95 duration-200">
@@ -7407,8 +7585,8 @@ export default function AdminPanel({
                         </div>
                       ) : (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {knowledgeSuggestions.map((item) => (
-                            <div key={item.id} className={`p-5 rounded-3xl border text-right space-y-3 transition-all ${
+                          {knowledgeSuggestions.map((item, index) => (
+                            <div key={item.id || `knowledge-${index}`} className={`p-5 rounded-3xl border text-right space-y-3 transition-all ${
                               item.status === 'approved'
                                 ? 'bg-emerald-500/5 border-emerald-500/20'
                                 : item.status === 'rejected'
@@ -7508,7 +7686,7 @@ export default function AdminPanel({
                         </div>
                       ) : (
                         <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-[500px] overflow-y-auto pr-2">
-                          {supportLogs.map((log) => {
+                          {supportLogs.map((log, index) => {
                             let icon = 'ℹ️';
                             let iconBg = 'bg-slate-100 text-slate-600';
                             if (log.action === 'ai_auto_reply' || log.action === 'ai_handling') {
@@ -7532,7 +7710,7 @@ export default function AdminPanel({
                             }
 
                             return (
-                              <div key={log.id} className="py-3 flex items-start gap-3 text-right">
+                              <div key={log.id || `log-${index}`} className="py-3 flex items-start gap-3 text-right">
                                 <div className={`w-8 h-8 rounded-full shrink-0 flex items-center justify-center text-sm ${iconBg}`}>
                                   {icon}
                                 </div>

@@ -2,7 +2,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 import path from "path";
 import fs from "fs";
-import { getApprovedKnowledge } from "./dbSupportService";
+import { getApprovedKnowledge, addSupportLog } from "./dbSupportService";
 
 dotenv.config();
 
@@ -72,6 +72,10 @@ Rules and Permissions:
    - English: "I tried to help you as best as I could, but I see that this case requires one of our technical support specialists."
    - French: "J'ai essayé de vous aider du mieux que j'ai pu, mais je vois que ce cas nécessite l'un de nos spécialistes du support technique."
    And then you MUST append the keyword [TRANSFER_TO_AGENT] at the absolute end of your response.
+
+CRITICAL INSTRUCTION FOR [TRANSFER_TO_AGENT]:
+- DO NOT append [TRANSFER_TO_AGENT] for regular greetings, general product questions, shipping inquiries, or any query you CAN successfully answer.
+- ONLY append [TRANSFER_TO_AGENT] when transfer to a human specialist is strictly required according to rule 3 above!
 `;
 
 // Helper to transcribe audio using Gemini
@@ -236,30 +240,73 @@ export async function generateAIResponse(
   newMessage: string,
   attachment?: { url: string; type: string }
 ): Promise<string> {
-  const ai = getAi();
-  if (!ai) {
-    // Return high quality fallback
-    if (newMessage.toLowerCase().includes("موظف") || newMessage.toLowerCase().includes("انسان") || newMessage.toLowerCase().includes("agent") || newMessage.toLowerCase().includes("speak")) {
-      return "حاضر يا فندم! سأقوم بتحويل المحادثة الآن إلى موظف دعم بشري وسيرد عليك فور تواجده. [TRANSFER_TO_AGENT] 💬🤝";
-    }
-    return "مرحباً بك! أنا مساعد الذكاء الاصطناعي لمتجر رايفو. الموظف غير متصل حالياً، لكني هنا لمساعدتك! بخصوص سؤالك، نوفر شحناً مجانياً وسريعاً خلال 2-4 أيام عمل، وضمان استبدال ذهبي لمدة 14 يوماً. هل تود أن أحولك لموظف بشري؟ [TRANSFER_TO_AGENT]";
+  const startTime = Date.now();
+  const sessionId = conversation?.id || conversation?.sessionId || 'guest';
+  const cleanMsg = (newMessage || '').trim();
+
+  console.log(`🤖 [AI_CALL_START] Starting AI response generation`);
+  console.log(`   ├─ Session ID: ${sessionId}`);
+  console.log(`   ├─ Customer Message: "${cleanMsg}"`);
+  console.log(`   └─ Attachment: ${attachment ? `${attachment.type} (${attachment.url})` : 'None'}`);
+
+  await addSupportLog(`[AI_CALL_START] Received message for session ${sessionId}: "${cleanMsg.slice(0, 60)}"`, 'AI_Gateway');
+
+  // 1. Check if user explicitly asked for human agent / customer service
+  const humanKeywordsRegex = /(تحدث مع|اريد|أريد|تحويل|كلم|مشرف|بشري|انسان|إنسان|موظف|دعم بشري|عملاء|خدمة العملاء|human agent|talk to agent|speak to human|live support|customer service)/i;
+  const isExplicitHumanRequest = humanKeywordsRegex.test(cleanMsg);
+
+  if (isExplicitHumanRequest) {
+    const reason = `Customer explicitly requested human support in message: "${cleanMsg}"`;
+    console.log(`🔀 [AI_TRANSFER_DECISION] Transfer Triggered: TRUE`);
+    console.log(`   └─ Reason: ${reason}`);
+    await addSupportLog(`[AI_TRANSFER] Session ${sessionId}: ${reason}`, 'AI_Gateway');
+
+    return "حاضر يا فندم! بناءً على طلبك، سأقوم بتحويل المحادثة الآن إلى أحد ممثلي خدمة العملاء وسيرد عليك فور تواجده. [TRANSFER_TO_AGENT] 💬🤝";
   }
 
-  try {
-    const contents = formatChatHistory(conversation.messages);
+  // 2. Initialize / check Gemini API client
+  const ai = getAi();
+  if (!ai) {
+    const errorReason = `GEMINI_API_KEY is not defined or AI client failed to initialize in environment.`;
+    console.error(`❌ [GEMINI_KEY_ERROR] ${errorReason}`);
+    await addSupportLog(`[GEMINI_KEY_ERROR] Session ${sessionId}: ${errorReason}`, 'AI_Gateway');
 
-    // If there is an attachment (multimodal: image or audio)
+    // Attempt smart FAQ lookup before falling back
+    try {
+      const approvedKnowledge = await getApprovedKnowledge();
+      if (approvedKnowledge && approvedKnowledge.length > 0) {
+        const lowerMsg = cleanMsg.toLowerCase();
+        const match = approvedKnowledge.find((k: any) => 
+          lowerMsg.includes(k.question.toLowerCase()) || k.question.toLowerCase().includes(lowerMsg)
+        );
+        if (match) {
+          console.log(`✨ [AI_CALL_SUCCESS] Matched approved store FAQ (No Gemini API Key needed).`);
+          return match.answer;
+        }
+      }
+    } catch (e: any) {
+      console.warn("Error querying local knowledge base fallback:", e.message);
+    }
+
+    // Default friendly store response without transferring
+    return "أهلاً بك في متجر رايفو! 🏍️\nكيف يمكنني مساعدتك اليوم؟ نوفر شحناً مجانياً وسريعاً (2-4 أيام عمل)، وضمان استبدال لمدة 14 يوماً على كافة المنتجات والخوذات واللوازم.";
+  }
+
+  // 3. Execute Gemini Generation
+  try {
+    const contents = formatChatHistory(conversation?.messages || []);
+
+    // Add attachment if available
     if (attachment && attachment.url) {
       const filePath = path.join(process.cwd(), 'public', attachment.url);
       if (fs.existsSync(filePath)) {
         const fileBuffer = fs.readFileSync(filePath);
         const mimeType = attachment.type.startsWith('image/') ? attachment.type : 
                          attachment.type.startsWith('audio/') ? attachment.type : 'application/octet-stream';
-        
         contents.push({
           role: "user",
           parts: [
-            { text: newMessage || "Please analyze this media file." },
+            { text: cleanMsg || "يرجى تحليل هذا الملف المرفق." },
             {
               inlineData: {
                 data: fileBuffer.toString("base64"),
@@ -271,17 +318,17 @@ export async function generateAIResponse(
       } else {
         contents.push({
           role: "user",
-          parts: [{ text: `${newMessage}\n[Attachment failed to load: ${attachment.url}]` }]
+          parts: [{ text: `${cleanMsg}\n[المرفق غير متاح: ${attachment.url}]` }]
         });
       }
     } else {
       contents.push({
         role: "user",
-        parts: [{ text: newMessage }]
+        parts: [{ text: cleanMsg }]
       });
     }
 
-    // Configure tools
+    // Tools setup
     const tools = [
       {
         functionDeclarations: [
@@ -322,7 +369,7 @@ export async function generateAIResponse(
       }
     ];
 
-    // Load continuous learning approved FAQ
+    // Load knowledge base
     let approvedKnowledgeStr = "";
     try {
       const approvedList = await getApprovedKnowledge();
@@ -333,7 +380,7 @@ export async function generateAIResponse(
       console.warn("Could not fetch approved knowledge base items:", e);
     }
 
-    // Load customer profile and last order context
+    // Profile context
     let customerProfileStr = "";
     if (conversation && conversation.clientEmail) {
       try {
@@ -350,32 +397,26 @@ export async function generateAIResponse(
             wallet = ud.wallet_balance || 0;
           }
           
-          // Fetch last order
           const ordersSnap = await db.collection("orders").get();
           const userOrders = ordersSnap.docs
             .map((d: any) => d.data())
             .filter((o: any) => o.user_email?.toLowerCase() === conversation.clientEmail.toLowerCase().trim());
           
-          let lastOrderInfo = "No previous orders.";
+          let lastOrderInfo = "لا توجد طلبات سابقة.";
           if (userOrders.length > 0) {
             userOrders.sort((a: any, b: any) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
             const lo = userOrders[0];
-            lastOrderInfo = `Order ID: ${lo.id}, Date: ${lo.date}, Status: ${lo.status}, Total: ${lo.total} SAR, Tracking Carrier: ${lo.supplier_name || 'RYVO Express'}, Tracking Number: ${lo.tracking_number || 'Pending'}, Expected Delivery: 2-3 Days.`;
+            lastOrderInfo = `رقم الطلب: ${lo.id}, التاريخ: ${lo.date}, الحالة: ${lo.status}, المجموع: ${lo.total} SAR, شركة الشحن: ${lo.supplier_name || 'RYVO Express'}, رقم التتبع: ${lo.tracking_number || 'قيد التجهيز'}.`;
           }
 
           customerProfileStr = `
-Customer Profile details (DO NOT ask the customer to enter these again, they are automatically known!):
+Customer Profile:
 - Name: ${name}
 - Email: ${conversation.clientEmail}
 - Loyalty Points: ${points}
 - Wallet Balance: ${wallet} SAR
 - Last Order Details: ${lastOrderInfo}
-- Total Orders Count: ${userOrders.length}
-- Device: ${conversation.device || 'Desktop'}
-- OS: ${conversation.os || 'Windows'}
-- Browser: ${conversation.browser || 'Chrome'}
-- Country: ${conversation.country || 'SA'}
-- Current Language Preferred: ${conversation.language || 'ar'}
+- Language Preferred: ${conversation.language || 'ar'}
 `;
         }
       } catch (e) {
@@ -390,10 +431,17 @@ ${customerProfileStr}
 
 ${approvedKnowledgeStr}
 
-REMEMBER: If the user asks where their order is, or requests details about points, use the tools or direct context above to answer in a helpful, friendly, and structured manner (do not ask them for their email/name/order ID if they are already visible in the context above!). Always detect and reply in the user's language preferred or detected.
+REMEMBER:
+- You are the primary AI Assistant for RYVO.
+- Answer all customer questions directly, clearly, and enthusiastically.
+- ONLY append [TRANSFER_TO_AGENT] if:
+  1. The user specifically requests a human representative/agent.
+  2. The user requests a prohibited action (e.g. order refund, order cancellation, changing delivery address).
+  3. You are completely unable to answer the question after checking all tools and FAQs.
+- DO NOT append [TRANSFER_TO_AGENT] for regular greetings, product inquiries, shipping policies, or standard store questions!
 `;
 
-    // Call Gemini with tools
+    // Call Gemini API
     let response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: contents,
@@ -403,13 +451,15 @@ REMEMBER: If the user asks where their order is, or requests details about point
       }
     });
 
+    const duration = Date.now() - startTime;
+
     // Check for function calls
     if (response.functionCalls && response.functionCalls.length > 0) {
       const call = response.functionCalls[0];
       const { name, args } = call;
       let functionResult = "";
 
-      console.log(`🤖 AI triggered function call: ${name}`, args);
+      console.log(`🤖 [AI_TOOL_CALL] Gemini triggered function call: ${name}`, args);
 
       if (name === "trackOrderAndShipping") {
         functionResult = await trackOrderAndShipping((args as any).orderId);
@@ -419,7 +469,6 @@ REMEMBER: If the user asks where their order is, or requests details about point
         functionResult = await checkLoyaltyPointsAndCoupons((args as any).email);
       }
 
-      // Add the function call and result back to contents and generate again
       contents.push(response.candidates?.[0]?.content as any || {
         role: "model",
         parts: [{ functionCall: { name, args } }]
@@ -435,7 +484,7 @@ REMEMBER: If the user asks where their order is, or requests details about point
         }]
       });
 
-      // Call Gemini again to format answer
+      // Second call to format
       response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
         contents: contents,
@@ -445,10 +494,40 @@ REMEMBER: If the user asks where their order is, or requests details about point
       });
     }
 
-    return response.text || "I apologize, I am unable to formulate a response at the moment.";
+    const rawText = response.text || "";
+    const hasTransferTag = rawText.includes("[TRANSFER_TO_AGENT]");
+
+    console.log(`✅ [AI_CALL_SUCCESS] Gemini call succeeded`);
+    console.log(`   ├─ Duration: ${duration}ms`);
+    console.log(`   ├─ Response Status: 200 OK`);
+    console.log(`   ├─ Response Length: ${rawText.length} chars`);
+    console.log(`   └─ Has Transfer Tag: ${hasTransferTag}`);
+
+    if (hasTransferTag) {
+      console.log(`🔀 [AI_TRANSFER_DECISION] Transfer Triggered: TRUE`);
+      console.log(`   └─ Reason: Gemini model decided to transfer to human support (e.g. unknown answer or sensitive request)`);
+      await addSupportLog(`[AI_TRANSFER] Session ${sessionId}: Gemini model requested transfer to human support.`, 'AI_Gateway');
+    } else {
+      console.log(`✨ [AI_TRANSFER_DECISION] Transfer Triggered: FALSE`);
+      console.log(`   └─ Reason: AI successfully answered customer query. Conversation remains in AI_HANDLING.`);
+      await addSupportLog(`[AI_SUCCESS] Session ${sessionId}: Gemini answered successfully in ${duration}ms.`, 'AI_Gateway');
+    }
+
+    return rawText || "أهلاً بك! كيف يمكنني مساعدتك اليوم؟";
   } catch (err: any) {
-    console.error("Error generating Gemini response:", err);
-    return "عذراً، حدث خطأ أثناء معالجة رد الذكاء الاصطناعي. هل تريد تحويلي إلى موظف دعم بشري؟ [TRANSFER_TO_AGENT]";
+    const duration = Date.now() - startTime;
+    const errorDetails = `Gemini API call failed after ${duration}ms. Error: ${err.message || err}`;
+
+    console.error(`❌ [AI_CALL_ERROR] ${errorDetails}`);
+    if (err.stack) console.error(`   └─ Stack:`, err.stack);
+
+    await addSupportLog(`[AI_CALL_ERROR] Session ${sessionId}: ${errorDetails}`, 'AI_Gateway');
+
+    // Transfer on Gemini API Exception
+    console.log(`🔀 [AI_TRANSFER_DECISION] Transfer Triggered: TRUE`);
+    console.log(`   └─ Reason: Gemini API Exception / Failure`);
+
+    return `عذراً، حدث خطأ أثناء التواصل مع المساعد الذكي (${err.message || 'API Error'}). تم توجيه الطلب إلى فريق الدعم المباشر لمساعدتك. [TRANSFER_TO_AGENT]`;
   }
 }
 

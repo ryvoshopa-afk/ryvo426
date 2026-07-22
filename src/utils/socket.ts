@@ -1,7 +1,7 @@
 import { io, Socket } from "socket.io-client";
 
 // Connect to the API server origin dynamically supporting Next.js and Vite env prefixes
-const getApiUrl = () => {
+export const getApiUrl = (): string => {
   const meta = import.meta as any;
   
   // 1. Check explicit environment variables first
@@ -16,19 +16,19 @@ const getApiUrl = () => {
     
     // If we are in local development, use localhost
     if (hostname === 'localhost' || hostname === '127.0.0.1') {
-      return 'http://localhost:3000';
+      return origin || 'http://localhost:3000';
     }
     
-    // If we are on Vercel or the production custom domain, point directly to the persistent Render backend
-    if (hostname.includes('ryvo.shop') || hostname.includes('vercel.app')) {
-      return 'https://ryvo-backend-hiw4.onrender.com';
+    // If we are on Vercel, Netlify, custom domain, or hosted preview, point directly to the persistent Render backend
+    if (hostname.includes('ryvo.shop') || hostname.includes('vercel.app') || hostname.includes('netlify.app') || hostname.includes('onrender.com')) {
+      return 'https://ryvo426.onrender.com';
     }
     
-    // Otherwise fallback to the current host origin (for local previews/dev server)
+    // Otherwise fallback to the current host origin
     return origin;
   }
   
-  return 'http://localhost:3000';
+  return 'https://ryvo426.onrender.com';
 };
 
 const socketUrl = getApiUrl();
@@ -36,7 +36,9 @@ const socketUrl = getApiUrl();
 export const socket: Socket = io(socketUrl, {
   autoConnect: false,
   reconnection: true,
-  reconnectionAttempts: 5,
-  reconnectionDelay: 1000
+  reconnectionAttempts: 10,
+  reconnectionDelay: 1000,
+  reconnectionDelayMax: 5000,
+  transports: ['polling', 'websocket']
 });
 export default socket;

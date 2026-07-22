@@ -3,6 +3,8 @@
  * Designed to prevent "Too Many Requests" (429) and "Failed to Fetch" errors.
  */
 
+import { getApiUrl } from './socket';
+
 interface FetchOptions extends RequestInit {
   maxRetries?: number;
   initialDelay?: number;
@@ -26,10 +28,19 @@ export async function smartFetch(url: string, options: FetchOptions = {}): Promi
     ...restOptions
   } = options;
 
+  // Resolve target URL cleanly
+  let targetUrl = url;
+  if (url.startsWith('/api/') && typeof window !== 'undefined') {
+    const baseUrl = getApiUrl();
+    if (baseUrl && !baseUrl.startsWith(window.location.origin)) {
+      targetUrl = `${baseUrl}${url}`;
+    }
+  }
+
   // Use simple memory cache for GET requests if specified
   const isGet = !restOptions.method || restOptions.method.toUpperCase() === 'GET';
   if (useCache && isGet && !forceRefresh) {
-    const cached = cacheMap.get(url);
+    const cached = cacheMap.get(targetUrl);
     if (cached && Date.now() - cached.timestamp < cacheTtl) {
       return cached.data;
     }
@@ -38,7 +49,7 @@ export async function smartFetch(url: string, options: FetchOptions = {}): Promi
   // Ensure we don't query if the tab is in the background (hidden)
   if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
     // If we have cached data, return it even if slightly stale to avoid fetching in bg
-    const cached = cacheMap.get(url);
+    const cached = cacheMap.get(targetUrl);
     if (cached) return cached.data;
   }
 
@@ -47,7 +58,7 @@ export async function smartFetch(url: string, options: FetchOptions = {}): Promi
 
   while (attempt < maxRetries) {
     try {
-      const response = await fetch(url, restOptions);
+      const response = await fetch(targetUrl, restOptions);
 
       // Handle Too Many Requests (429) specifically
       if (response.status === 429) {

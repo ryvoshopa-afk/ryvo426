@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Language, User as UserType } from '../types';
 import { TRANSLATIONS } from '../constants/translations';
 import socket from '../utils/socket';
+import { smartFetch } from '../utils/smartFetch';
 import {
   Send, User, MessageSquare, BadgeCheck, Sparkles, Paperclip, X,
   Home, FileText, Image as ImageIcon, Star, CheckCircle2,
@@ -202,15 +203,40 @@ export default function SupportChat({ currentLanguage, currentUser, onClose }: S
     };
   }, [conversationId, addMessage]);
 
+  const [isServerHealthy, setIsServerHealthy] = useState(true);
+
+  // ─── Health Check & Sync ───────────────────────────────────────────────────
+  useEffect(() => {
+    let isMounted = true;
+    const checkHealth = async () => {
+      try {
+        const data = await smartFetch('/api/health', { maxRetries: 1 });
+        if (isMounted && data && data.status === 'ok') {
+          setIsServerHealthy(true);
+          if (typeof data.adminOnline === 'boolean') {
+            setSettings(prev => ({ ...prev, isAgentOnline: data.adminOnline }));
+          }
+        }
+      } catch {
+        if (isMounted) setIsServerHealthy(false);
+      }
+    };
+
+    checkHealth();
+    const interval = setInterval(checkHealth, 12000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
+
   // ─── Load conversation from server on mount ─────────────────────────────────
   useEffect(() => {
-    fetch('/api/support/settings')
-      .then(r => r.json())
+    smartFetch('/api/support/settings')
       .then(d => { if (d?.welcomeMessage) setSettings(d); })
       .catch(() => {});
 
-    fetch(`/api/support/conversations/${encodeURIComponent(conversationId)}`)
-      .then(r => r.json())
+    smartFetch(`/api/support/conversations/${encodeURIComponent(conversationId)}`)
       .then(data => {
         if (!data) return;
         if (data.status) setConvStatus(data.status as ConvStatus);
@@ -354,12 +380,11 @@ export default function SupportChat({ currentLanguage, currentUser, onClose }: S
 
     if (audioFile) {
       try {
-        const res = await fetch('/api/support/upload', {
+        const data = await smartFetch('/api/support/upload', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ fileName: audioFile.name, fileType: audioFile.type, base64Data: audioFile.base64 })
         });
-        const data = await res.json();
         uploadedUrl = data.url;
         uploadType = 'audio';
       } catch { 
@@ -370,12 +395,11 @@ export default function SupportChat({ currentLanguage, currentUser, onClose }: S
       }
     } else if (selectedFile) {
       try {
-        const res = await fetch('/api/support/upload', {
+        const data = await smartFetch('/api/support/upload', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ fileName: selectedFile.name, fileType: selectedFile.type, base64Data: selectedFile.base64 })
         });
-        const data = await res.json();
         uploadedUrl = data.url;
         uploadType = selectedFile.type.startsWith('image/') ? 'image' : 'file';
       } catch { 
@@ -428,7 +452,7 @@ export default function SupportChat({ currentLanguage, currentUser, onClose }: S
     } else {
       // Also call REST API ONLY as fallback if socket is offline
       try {
-        await fetch(`/api/support/conversations/${encodeURIComponent(conversationId)}/message`, {
+        await smartFetch(`/api/support/conversations/${encodeURIComponent(conversationId)}/message`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -458,7 +482,7 @@ export default function SupportChat({ currentLanguage, currentUser, onClose }: S
   const handleRatingSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await fetch(`/api/support/conversations/${encodeURIComponent(conversationId)}/rate`, {
+      await smartFetch(`/api/support/conversations/${encodeURIComponent(conversationId)}/rate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rating: ratingInput, ratingComment })
@@ -529,23 +553,27 @@ export default function SupportChat({ currentLanguage, currentUser, onClose }: S
                 {convStatus === 'HUMAN_HANDLING' ? '👨‍💼' : '🤖'}
               </div>
               <span className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-[#0f1923] ${
-                settings.isAgentOnline ? 'bg-emerald-400' : 'bg-rose-500'
+                settings.isAgentOnline ? 'bg-emerald-400' : 'bg-sky-400'
               }`} />
             </div>
             <div>
               <div className="flex items-center gap-1.5 flex-wrap">
                 <p className="font-black text-sm leading-tight">{convStatus === 'HUMAN_HANDLING' ? (isRtl ? 'موظف الدعم' : 'Support Agent') : settings.supportName}</p>
                 <span className="text-[10px] font-extrabold flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/10">
-                  <span className={`w-1.5 h-1.5 rounded-full ${settings.isAgentOnline ? 'bg-emerald-400 animate-pulse' : 'bg-rose-500'}`} />
-                  <span className={settings.isAgentOnline ? 'text-emerald-400' : 'text-rose-400'}>
-                    {settings.isAgentOnline ? (isRtl ? 'متصل' : 'Online') : (isRtl ? 'غير متصل' : 'Offline')}
+                  <span className={`w-1.5 h-1.5 rounded-full ${settings.isAgentOnline ? 'bg-emerald-400 animate-pulse' : 'bg-sky-400 animate-pulse'}`} />
+                  <span className={settings.isAgentOnline ? 'text-emerald-400' : 'text-sky-300'}>
+                    {settings.isAgentOnline 
+                      ? (isRtl ? 'مدير الدعم (متصل)' : 'Support Agent (Online)') 
+                      : (isRtl ? 'الرد الآلي (نشط)' : 'AI Support (Active)')}
                   </span>
                 </span>
               </div>
               <div className={`flex items-center gap-1 text-[10px] font-bold ${badge.color} mt-0.5`}>
                 {badge.icon}
                 <span>{badge.label}</span>
-                {!socketConnected && <span className="text-rose-400 ml-1">({isRtl ? 'انقطع الاتصال بالخادم' : 'Server disconnected'})</span>}
+                {!socketConnected && !isServerHealthy && (
+                  <span className="text-amber-400 ml-1 font-semibold">({isRtl ? 'جاري الاتصال بالخادم...' : 'Reconnecting...'})</span>
+                )}
               </div>
             </div>
           </div>

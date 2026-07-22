@@ -5,6 +5,7 @@ import {
   Settings, Clock, Target, Plus, Search, Eye, BookOpen, Heart, Share2, CornerRightDown
 } from 'lucide-react';
 import { Product, Language } from '../types';
+import { smartFetch } from '../utils/smartFetch';
 
 interface AiMarketingStudioProps {
   products: Product[];
@@ -259,17 +260,16 @@ export default function AiMarketingStudio({
   // --- EXECUTING REAL GEMINI GENERATION VIA BACKEND ---
   const executeGeminiCall = async (promptText: string, systemInstructionText: string) => {
     try {
-      const res = await fetch('/api/marketing-agent-generate', {
+      const res = await smartFetch('/api/marketing-agent-generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: promptText,
           systemInstruction: systemInstructionText,
-          model: 'gemini-3.5-flash'
+          model: 'gemini-2.5-flash'
         })
       });
-      const data = await res.json();
-      return data.response;
+      return res.response;
     } catch (e) {
       console.error('Failed to call Gemini API, falling back safely:', e);
       return null;

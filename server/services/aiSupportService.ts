@@ -16,22 +16,26 @@ let getDbInstance: () => any = () => {
   return dbGetter();
 };
 
-const apiKey = process.env.GEMINI_API_KEY;
-let ai: GoogleGenAI | null = null;
+let aiInstance: GoogleGenAI | null = null;
 
-if (apiKey) {
-  try {
-    ai = new GoogleGenAI({
-      apiKey: apiKey,
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
+function getAi(): GoogleGenAI | null {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+  if (!aiInstance) {
+    try {
+      aiInstance = new GoogleGenAI({
+        apiKey: apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
         }
-      }
-    });
-  } catch (e) {
-    console.error("⚠️ Failed to initialize Gemini in aiSupportService:", e);
+      });
+    } catch (e) {
+      console.error("⚠️ Failed to initialize Gemini in aiSupportService:", e);
+    }
   }
+  return aiInstance;
 }
 
 // System Instructions
@@ -72,6 +76,7 @@ Rules and Permissions:
 
 // Helper to transcribe audio using Gemini
 export async function transcribeAudio(fileBuffer: Buffer, mimeType: string): Promise<string> {
+  const ai = getAi();
   if (!ai) {
     return "[Transcription: (Voice Message)]";
   }
@@ -79,7 +84,7 @@ export async function transcribeAudio(fileBuffer: Buffer, mimeType: string): Pro
   try {
     const prompt = "Please transcribe this voice recording accurately into text. Only return the transcription, do not add any comments, explanations, or introductions. Support Arabic, English, and French.";
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-2.5-flash",
       contents: [
         { text: prompt },
         {
@@ -231,6 +236,7 @@ export async function generateAIResponse(
   newMessage: string,
   attachment?: { url: string; type: string }
 ): Promise<string> {
+  const ai = getAi();
   if (!ai) {
     // Return high quality fallback
     if (newMessage.toLowerCase().includes("موظف") || newMessage.toLowerCase().includes("انسان") || newMessage.toLowerCase().includes("agent") || newMessage.toLowerCase().includes("speak")) {
@@ -389,7 +395,7 @@ REMEMBER: If the user asks where their order is, or requests details about point
 
     // Call Gemini with tools
     let response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-2.5-flash",
       contents: contents,
       config: {
         systemInstruction: dynamicInstructions,
@@ -431,7 +437,7 @@ REMEMBER: If the user asks where their order is, or requests details about point
 
       // Call Gemini again to format answer
       response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "gemini-2.5-flash",
         contents: contents,
         config: {
           systemInstruction: dynamicInstructions
@@ -455,6 +461,7 @@ export async function generateSmartSummary(conversation: any): Promise<string> {
 سبب التحويل: طلب التحدث مع الدعم الفني
 الحالة: بانتظار موظف`;
 
+  const ai = getAi();
   if (!ai) {
     return defaultSummary;
   }
@@ -486,7 +493,7 @@ Please generate the structured summary now. Keep it brief, factual, and strictly
 `;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-2.5-flash",
       contents: userPrompt,
       config: {
         systemInstruction: systemPrompt

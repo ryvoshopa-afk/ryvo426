@@ -3538,24 +3538,26 @@ Sitemap: ${baseUrl}/sitemap.xml
 
 // Initialize Gemini safely
 let ai: GoogleGenAI | null = null;
-const apiKey = process.env.GEMINI_API_KEY;
 
-if (apiKey) {
-  try {
-    ai = new GoogleGenAI({
-      apiKey: apiKey,
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
+function getGeminiServerAi(): GoogleGenAI | null {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+  if (!ai) {
+    try {
+      ai = new GoogleGenAI({
+        apiKey: apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
         }
-      }
-    });
-    console.log("💎 Gemini API initialized successfully on the back-end.");
-  } catch (e) {
-    console.error("⚠️ Failed to initialize Gemini client:", e);
+      });
+      console.log("💎 Gemini API initialized successfully on the back-end.");
+    } catch (e) {
+      console.error("⚠️ Failed to initialize Gemini client:", e);
+    }
   }
-} else {
-  console.log("⚠️ GEMINI_API_KEY is not defined. Using high-fidelity content generators fallback.");
+  return ai;
 }
 
 // 1. Intelligent Store Customer Support Assistant AI
@@ -3600,6 +3602,7 @@ IMPORTANT INSTRUCTIONS:
 4. If they ask for recommendations, suggest items from the catalog matching their interests with their price.
 5. If the Gemini API client is active and answers, make sure to sound perfectly human without indicating that you are an AI model reading structured lists. Keep replies concise and extremely helpful.`;
 
+  const ai = getGeminiServerAi();
   if (ai) {
     try {
       // Format chat history for Gemini
@@ -3612,7 +3615,7 @@ IMPORTANT INSTRUCTIONS:
       ];
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "gemini-2.5-flash",
         contents: contents,
         config: {
           systemInstruction: systemPrompt,
@@ -3751,6 +3754,16 @@ async function saveSupportSettings(settings: any) {
     fs.writeFileSync(SUPPORT_SETTINGS_FILE, JSON.stringify(settings, null, 2), "utf8");
   } catch (e) {}
 }
+
+// 0. Health Check Endpoint
+app.get("/api/health", (req, res) => {
+  res.json({
+    status: "ok",
+    timestamp: Date.now(),
+    geminiConfigured: !!process.env.GEMINI_API_KEY,
+    adminOnline: isAnyAdminOnline()
+  });
+});
 
 // 1. Get Support Settings
 app.get("/api/support/settings", async (req, res) => {
@@ -4134,10 +4147,11 @@ Tag: ${product.tag_en}
 Language: ${isAr ? "Arabic" : "English"}.
 Keep it incredibly exciting, tailored for motorcycle/bike action enthusiasts!`;
 
+  const ai = getGeminiServerAi();
   if (ai) {
     try {
       const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "gemini-2.5-flash",
         contents: userPrompt,
         config: { systemInstruction: systemPrompt }
       });
@@ -4207,10 +4221,11 @@ You generate highly engaging, informative, and viral posts containing relevant e
 
   const userPrompt = promptsMap[category] || promptsMap["tips"];
 
+  const ai = getGeminiServerAi();
   if (ai) {
     try {
       const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "gemini-2.5-flash",
         contents: userPrompt,
         config: { systemInstruction: systemPrompt }
       });
@@ -4353,10 +4368,11 @@ Active Inventory: ${products.length} products.
 Orders Count: ${orders.length} orders total.
 Please propose custom recommendations. Keep descriptions short, snappy, and very clear.`;
 
+  const ai = getGeminiServerAi();
   if (ai) {
     try {
       const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "gemini-2.5-flash",
         contents: userPrompt,
         config: { systemInstruction: systemPrompt }
       });
@@ -4389,16 +4405,18 @@ Please propose custom recommendations. Keep descriptions short, snappy, and very
 
 // 5. Multi-Purpose AI Marketing Agent Generator Endpoint
 app.post("/api/marketing-agent-generate", async (req, res) => {
-  const { prompt, systemInstruction = "You are a helpful assistant", model = "gemini-3.5-flash" } = req.body;
+  const { prompt, systemInstruction = "You are a helpful assistant", model = "gemini-2.5-flash" } = req.body;
 
   if (!prompt) {
     return res.status(400).json({ error: "Prompt is required" });
   }
 
+  const ai = getGeminiServerAi();
   if (ai) {
     try {
+      const targetModel = model.includes("3.5") ? "gemini-2.5-flash" : model;
       const response = await ai.models.generateContent({
-        model: model,
+        model: targetModel,
         contents: prompt,
         config: { systemInstruction: systemInstruction }
       });

@@ -266,7 +266,7 @@ export default function AiMarketingStudio({
         body: JSON.stringify({
           prompt: promptText,
           systemInstruction: systemInstructionText,
-          model: 'gemini-2.5-flash'
+          model: (import.meta as any).env?.VITE_GEMINI_MODEL || 'gemini-2.5-flash-lite'
         })
       });
       return res.response;

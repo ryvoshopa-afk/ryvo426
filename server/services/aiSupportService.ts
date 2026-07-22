@@ -38,6 +38,8 @@ function getAi(): GoogleGenAI | null {
   return aiInstance;
 }
 
+const DEFAULT_GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
+
 // System Instructions
 const SYSTEM_INSTRUCTIONS = `
 You are the elite, AI-powered Technical Support Specialist for "RYVO", a premium store specializing in high-performance motorcycles, smart helmets (e.g., NeoCarbon), gear, and premium riding accessories.
@@ -88,7 +90,7 @@ export async function transcribeAudio(fileBuffer: Buffer, mimeType: string): Pro
   try {
     const prompt = "Please transcribe this voice recording accurately into text. Only return the transcription, do not add any comments, explanations, or introductions. Support Arabic, English, and French.";
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: DEFAULT_GEMINI_MODEL,
       contents: [
         { text: prompt },
         {
@@ -443,7 +445,7 @@ REMEMBER:
 
     // Call Gemini API
     let response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: DEFAULT_GEMINI_MODEL,
       contents: contents,
       config: {
         systemInstruction: dynamicInstructions,
@@ -486,7 +488,7 @@ REMEMBER:
 
       // Second call to format
       response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: DEFAULT_GEMINI_MODEL,
         contents: contents,
         config: {
           systemInstruction: dynamicInstructions
@@ -572,7 +574,7 @@ Please generate the structured summary now. Keep it brief, factual, and strictly
 `;
 
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: DEFAULT_GEMINI_MODEL,
       contents: userPrompt,
       config: {
         systemInstruction: systemPrompt

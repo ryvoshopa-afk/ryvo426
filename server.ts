@@ -3614,8 +3614,9 @@ IMPORTANT INSTRUCTIONS:
         { role: "user", parts: [{ text: message }] }
       ];
 
+      const defaultModel = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: defaultModel,
         contents: contents,
         config: {
           systemInstruction: systemPrompt,
@@ -4150,8 +4151,9 @@ Keep it incredibly exciting, tailored for motorcycle/bike action enthusiasts!`;
   const ai = getGeminiServerAi();
   if (ai) {
     try {
+      const defaultModel = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: defaultModel,
         contents: userPrompt,
         config: { systemInstruction: systemPrompt }
       });
@@ -4224,8 +4226,9 @@ You generate highly engaging, informative, and viral posts containing relevant e
   const ai = getGeminiServerAi();
   if (ai) {
     try {
+      const defaultModel = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: defaultModel,
         contents: userPrompt,
         config: { systemInstruction: systemPrompt }
       });
@@ -4371,8 +4374,9 @@ Please propose custom recommendations. Keep descriptions short, snappy, and very
   const ai = getGeminiServerAi();
   if (ai) {
     try {
+      const defaultModel = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: defaultModel,
         contents: userPrompt,
         config: { systemInstruction: systemPrompt }
       });
@@ -4405,7 +4409,8 @@ Please propose custom recommendations. Keep descriptions short, snappy, and very
 
 // 5. Multi-Purpose AI Marketing Agent Generator Endpoint
 app.post("/api/marketing-agent-generate", async (req, res) => {
-  const { prompt, systemInstruction = "You are a helpful assistant", model = "gemini-2.5-flash" } = req.body;
+  const defaultModel = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
+  const { prompt, systemInstruction = "You are a helpful assistant", model = defaultModel } = req.body;
 
   if (!prompt) {
     return res.status(400).json({ error: "Prompt is required" });
@@ -4414,7 +4419,7 @@ app.post("/api/marketing-agent-generate", async (req, res) => {
   const ai = getGeminiServerAi();
   if (ai) {
     try {
-      const targetModel = model.includes("3.5") ? "gemini-2.5-flash" : model;
+      const targetModel = (model && (model.includes("2.5") || model.includes("1.5"))) ? defaultModel : (model || defaultModel);
       const response = await ai.models.generateContent({
         model: targetModel,
         contents: prompt,

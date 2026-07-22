@@ -173,12 +173,31 @@ export default function SupportChat({ currentLanguage, currentUser, onClose }: S
       if (ai_summary) setAiSummary(ai_summary);
     });
 
+    const handleSupportOnline = () => {
+      setSettings(prev => ({ ...prev, isAgentOnline: true }));
+    };
+
+    const handleSupportOffline = () => {
+      setSettings(prev => ({ ...prev, isAgentOnline: false }));
+    };
+
+    const handleSupportStatus = ({ isAgentOnline }: { isAgentOnline: boolean }) => {
+      setSettings(prev => ({ ...prev, isAgentOnline }));
+    };
+
+    socket.on('support:online', handleSupportOnline);
+    socket.on('support:offline', handleSupportOffline);
+    socket.on('support_status', handleSupportStatus);
+
     return () => {
       socket.off('connect');
       socket.off('disconnect');
       socket.off('message_received');
       socket.off('typing_status');
       socket.off('status_updated');
+      socket.off('support:online', handleSupportOnline);
+      socket.off('support:offline', handleSupportOffline);
+      socket.off('support_status', handleSupportStatus);
       socket.disconnect();
     };
   }, [conversationId, addMessage]);
@@ -509,14 +528,24 @@ export default function SupportChat({ currentLanguage, currentUser, onClose }: S
               <div className="w-10 h-10 rounded-full bg-gradient-to-br from-sky-500 to-violet-600 flex items-center justify-center text-xl shadow-lg">
                 {convStatus === 'HUMAN_HANDLING' ? '👨‍💼' : '🤖'}
               </div>
-              <span className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-[#0f1923] ${convStatus === 'HUMAN_HANDLING' ? 'bg-emerald-400' : 'bg-sky-400'}`} />
+              <span className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-[#0f1923] ${
+                settings.isAgentOnline ? 'bg-emerald-400' : 'bg-rose-500'
+              }`} />
             </div>
             <div>
-              <p className="font-black text-sm leading-tight">{convStatus === 'HUMAN_HANDLING' ? (isRtl ? 'موظف الدعم' : 'Support Agent') : settings.supportName}</p>
-              <div className={`flex items-center gap-1 text-[10px] font-bold ${badge.color}`}>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <p className="font-black text-sm leading-tight">{convStatus === 'HUMAN_HANDLING' ? (isRtl ? 'موظف الدعم' : 'Support Agent') : settings.supportName}</p>
+                <span className="text-[10px] font-extrabold flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/10">
+                  <span className={`w-1.5 h-1.5 rounded-full ${settings.isAgentOnline ? 'bg-emerald-400 animate-pulse' : 'bg-rose-500'}`} />
+                  <span className={settings.isAgentOnline ? 'text-emerald-400' : 'text-rose-400'}>
+                    {settings.isAgentOnline ? (isRtl ? 'متصل' : 'Online') : (isRtl ? 'غير متصل' : 'Offline')}
+                  </span>
+                </span>
+              </div>
+              <div className={`flex items-center gap-1 text-[10px] font-bold ${badge.color} mt-0.5`}>
                 {badge.icon}
                 <span>{badge.label}</span>
-                {!socketConnected && <span className="text-rose-400 ml-1">({isRtl ? 'غير متصل' : 'offline'})</span>}
+                {!socketConnected && <span className="text-rose-400 ml-1">({isRtl ? 'انقطع الاتصال بالخادم' : 'Server disconnected'})</span>}
               </div>
             </div>
           </div>

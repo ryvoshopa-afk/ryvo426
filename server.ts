@@ -6,7 +6,7 @@ import { createServer as createViteServer } from "vite";
 import { createServer as createHttpServer } from "http";
 import { Server as SocketIOServer } from "socket.io";
 import { initDb } from "./server/db";
-import { initSockets } from "./server/sockets";
+import { initSockets, isAnyAdminOnline } from "./server/sockets";
 import * as dbSupportService from "./server/services/dbSupportService";
 import { getDbStatus, query as pgQuery } from "./server/db";
 import { generateAIResponse, generateSmartSummary, transcribeAudio, setAiSupportDbGetter } from "./server/services/aiSupportService";
@@ -3755,13 +3755,25 @@ async function saveSupportSettings(settings: any) {
 // 1. Get Support Settings
 app.get("/api/support/settings", async (req, res) => {
   const settings = await getSupportSettings();
-  res.json(settings);
+  const liveIsAgentOnline = isAnyAdminOnline() || !!settings.isAgentOnline;
+  res.json({
+    ...settings,
+    isAgentOnline: liveIsAgentOnline
+  });
 });
 
 // 2. Save Support Settings
 app.post("/api/support/settings", async (req, res) => {
   const settings = req.body;
   await saveSupportSettings(settings);
+
+  // Broadcast real-time change to all clients if socket server is active
+  if (io) {
+    const isOnline = !!settings.isAgentOnline || isAnyAdminOnline();
+    io.emit('support_status', { isAgentOnline: isOnline });
+    io.emit(isOnline ? 'support:online' : 'support:offline');
+  }
+
   res.json({ success: true, settings });
 });
 

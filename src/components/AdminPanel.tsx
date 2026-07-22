@@ -1453,7 +1453,7 @@ export default function AdminPanel({
 
     // Connect to Socket.io and register admin as support staff
     socket.connect();
-    socket.emit('join_conversation', { sessionId: currentUser.email });
+    socket.emit('join_conversation', { sessionId: currentUser.email, isAdmin: true });
 
     const fetchSupportData = async () => {
       // Skip if page is hidden

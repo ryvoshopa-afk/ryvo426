@@ -14,6 +14,12 @@ import {
   transcribeAudio
 } from './services/aiSupportService';
 
+export const connectedAdmins = new Set<string>();
+
+export function isAnyAdminOnline(): boolean {
+  return connectedAdmins.size > 0;
+}
+
 export function initSockets(io: Server) {
   console.log("🔌 Initializing Socket.io Event Listeners...");
 
@@ -21,15 +27,26 @@ export function initSockets(io: Server) {
     console.log(`🔌 Client connected: ${socket.id}`);
 
     // Join a support conversation room
-    socket.on('join_conversation', async ({ sessionId }) => {
+    socket.on('join_conversation', async ({ sessionId, isAdmin }) => {
       if (!sessionId) return;
       const cleanSessionId = sessionId.toLowerCase().trim();
       const roomName = `conversation_${cleanSessionId}`;
       socket.join(roomName);
-      console.log(`👤 Client ${socket.id} joined room ${roomName}`);
+      console.log(`👤 Client ${socket.id} joined room ${roomName} (isAdmin: ${isAdmin})`);
 
-      // If this is an agent, join the 'agents' room
-      socket.join('agents_room');
+      // Determine if the connecting client is an admin
+      const isActuallyAdmin = !!isAdmin || cleanSessionId === 'ryvo.shopa@gmail.com';
+
+      if (isActuallyAdmin) {
+        socket.join('agents_room');
+        socket.data.isAdmin = true;
+        connectedAdmins.add(socket.id);
+        console.log(`🔑 Admin ${socket.id} joined agents_room. Total connected admins: ${connectedAdmins.size}`);
+
+        // Broadcast to everyone that an admin is online
+        io.emit('support:online');
+        io.emit('support_status', { isAgentOnline: true });
+      }
     });
 
     // Handle incoming messages
@@ -245,6 +262,15 @@ export function initSockets(io: Server) {
     // Handle disconnect
     socket.on('disconnect', () => {
       console.log(`🔌 Client disconnected: ${socket.id}`);
+      if (socket.data?.isAdmin || connectedAdmins.has(socket.id)) {
+        connectedAdmins.delete(socket.id);
+        console.log(`🔑 Admin ${socket.id} disconnected. Total remaining admins: ${connectedAdmins.size}`);
+
+        if (connectedAdmins.size === 0) {
+          io.emit('support:offline');
+          io.emit('support_status', { isAgentOnline: false });
+        }
+      }
     });
   });
 }

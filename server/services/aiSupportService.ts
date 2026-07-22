@@ -17,6 +17,44 @@ let getDbInstance: () => any = () => {
 };
 
 let aiInstance: GoogleGenAI | null = null;
+let modelsLoggedSupport = false;
+
+export async function listAndLogGeminiModels(): Promise<string[]> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    console.warn("⚠️ [GEMINI_MODELS_LIST] Cannot list models: GEMINI_API_KEY is missing in process.env");
+    return [];
+  }
+
+  const modelNames: string[] = [];
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+    if (res.ok) {
+      const data = await res.json() as { models?: Array<{ name?: string }> };
+      if (data.models && Array.isArray(data.models)) {
+        for (const m of data.models) {
+          if (m.name) modelNames.push(m.name);
+        }
+      }
+    } else {
+      const errText = await res.text();
+      console.error(`❌ [GEMINI_MODELS_LIST] REST HTTP ${res.status}:`, errText);
+    }
+  } catch (err: any) {
+    console.error("❌ [GEMINI_MODELS_LIST] Error fetching models:", err?.message || err);
+  }
+
+  console.log("📋 ========================================================");
+  console.log(`📋 [GEMINI_MODELS_LIST] Available models for GEMINI_API_KEY (${modelNames.length} total):`);
+  if (modelNames.length === 0) {
+    console.log("   ⚠️ No models returned from Google API.");
+  } else {
+    modelNames.forEach((name, i) => console.log(`   ${i + 1}. ${name}`));
+  }
+  console.log("📋 ========================================================");
+
+  return modelNames;
+}
 
 function getAi(): GoogleGenAI | null {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -31,6 +69,10 @@ function getAi(): GoogleGenAI | null {
           }
         }
       });
+      if (!modelsLoggedSupport) {
+        modelsLoggedSupport = true;
+        listAndLogGeminiModels().catch(() => {});
+      }
     } catch (e) {
       console.error("⚠️ Failed to initialize Gemini in aiSupportService:", e);
     }
@@ -518,10 +560,13 @@ REMEMBER:
     return rawText || "أهلاً بك! كيف يمكنني مساعدتك اليوم؟";
   } catch (err: any) {
     const duration = Date.now() - startTime;
-    const errorDetails = `Gemini API call failed after ${duration}ms. Error: ${err.message || err}`;
+    const errorDetails = `Gemini API call failed after ${duration}ms using model [${DEFAULT_GEMINI_MODEL}]. Error: ${err.message || err}`;
 
     console.error(`❌ [AI_CALL_ERROR] ${errorDetails}`);
     if (err.stack) console.error(`   └─ Stack:`, err.stack);
+
+    // Print all available models for debugging
+    listAndLogGeminiModels().catch(() => {});
 
     await addSupportLog(`[AI_CALL_ERROR] Session ${sessionId}: ${errorDetails}`, 'AI_Gateway');
 

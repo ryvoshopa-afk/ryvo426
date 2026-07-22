@@ -3538,6 +3538,44 @@ Sitemap: ${baseUrl}/sitemap.xml
 
 // Initialize Gemini safely
 let ai: GoogleGenAI | null = null;
+let serverModelsLogged = false;
+
+async function listAndLogGeminiModelsServer(): Promise<string[]> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    console.warn("⚠️ [GEMINI_MODELS_LIST] Cannot list models: GEMINI_API_KEY environment variable is missing.");
+    return [];
+  }
+
+  const modelNames: string[] = [];
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+    if (res.ok) {
+      const data = await res.json() as { models?: Array<{ name?: string }> };
+      if (data.models && Array.isArray(data.models)) {
+        for (const m of data.models) {
+          if (m.name) modelNames.push(m.name);
+        }
+      }
+    } else {
+      const errText = await res.text();
+      console.error(`❌ [GEMINI_MODELS_LIST] REST HTTP ${res.status}:`, errText);
+    }
+  } catch (err: any) {
+    console.error("❌ [GEMINI_MODELS_LIST] Error fetching models:", err?.message || err);
+  }
+
+  console.log("📋 ========================================================");
+  console.log(`📋 [GEMINI_MODELS_LIST] Total available models for GEMINI_API_KEY: ${modelNames.length}`);
+  if (modelNames.length === 0) {
+    console.log("   ⚠️ No models returned from Google API list call.");
+  } else {
+    modelNames.forEach((name, idx) => console.log(`   ${idx + 1}. ${name}`));
+  }
+  console.log("📋 ========================================================");
+
+  return modelNames;
+}
 
 function getGeminiServerAi(): GoogleGenAI | null {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -3553,12 +3591,27 @@ function getGeminiServerAi(): GoogleGenAI | null {
         }
       });
       console.log("💎 Gemini API initialized successfully on the back-end.");
+      if (!serverModelsLogged) {
+        serverModelsLogged = true;
+        listAndLogGeminiModelsServer().catch(() => {});
+      }
     } catch (e) {
       console.error("⚠️ Failed to initialize Gemini client:", e);
     }
   }
   return ai;
 }
+
+// Public API Endpoint to query available Gemini models
+app.get("/api/gemini-models", async (req, res) => {
+  const models = await listAndLogGeminiModelsServer();
+  return res.json({
+    geminiApiKeyConfigured: !!process.env.GEMINI_API_KEY,
+    geminiModelEnv: process.env.GEMINI_MODEL || "gemini-2.5-flash-lite",
+    totalModelsFound: models.length,
+    models: models
+  });
+});
 
 // 1. Intelligent Store Customer Support Assistant AI
 app.post("/api/chat-gemini", async (req, res) => {

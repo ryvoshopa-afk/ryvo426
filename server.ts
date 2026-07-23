@@ -3943,7 +3943,7 @@ app.post("/api/support/conversations/:id/message", async (req, res) => {
             sender: 'support',
             text: cleanAiReply
           });
-          const summary = await generateSmartSummary(conversation);
+          const summary = await generateSmartSummary(conversation, conversation.transfer_reason);
           await dbSupportService.updateConversationSummary(conversation.id, summary);
 
           if (io) {

@@ -2,9 +2,36 @@ import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 import path from "path";
 import fs from "fs";
-import { getApprovedKnowledge, addSupportLog } from "./dbSupportService";
+import { getApprovedKnowledge, addSupportLog, updateConversationTransferReason } from "./dbSupportService";
 
 dotenv.config();
+
+// Track consecutive Gemini failures per session
+const sessionFailureCounts = new Map<string, number>();
+const MAX_CONSECUTIVE_FAILURES = 3;
+
+// Helper to call Gemini with 1 automatic retry on error
+async function callGeminiWithRetry(ai: GoogleGenAI, params: any, sessionId: string): Promise<any> {
+  try {
+    return await ai.models.generateContent(params);
+  } catch (err: any) {
+    console.warn(`⚠️ [GEMINI_RETRY] Initial call failed for session ${sessionId}: ${err.message || err}. Retrying in 500ms...`);
+    await addSupportLog(`[GEMINI_RETRY] Initial call failed for session ${sessionId}: ${err.message || err}. Retrying...`, 'AI_Gateway');
+
+    // Wait 500ms before single automatic retry
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    try {
+      const retryResponse = await ai.models.generateContent(params);
+      console.log(`✅ [GEMINI_RETRY_SUCCESS] Second attempt succeeded for session ${sessionId}`);
+      await addSupportLog(`[GEMINI_RETRY_SUCCESS] Automatic retry succeeded for session ${sessionId}`, 'AI_Gateway');
+      return retryResponse;
+    } catch (retryErr: any) {
+      console.error(`❌ [GEMINI_RETRY_FAILED] Automatic retry also failed for session ${sessionId}: ${retryErr.message || retryErr}`);
+      throw retryErr;
+    }
+  }
+}
 
 let dbGetter: () => any = () => null;
 
@@ -300,9 +327,14 @@ export async function generateAIResponse(
   const isExplicitHumanRequest = humanKeywordsRegex.test(cleanMsg);
 
   if (isExplicitHumanRequest) {
-    const reason = `Customer explicitly requested human support in message: "${cleanMsg}"`;
+    const reason = `طلب العميل صراحة التحدث مع موظف خدمة العملاء: "${cleanMsg}"`;
     console.log(`🔀 [AI_TRANSFER_DECISION] Transfer Triggered: TRUE`);
     console.log(`   └─ Reason: ${reason}`);
+
+    sessionFailureCounts.set(sessionId, 0);
+    await updateConversationTransferReason(conversation.id || sessionId, reason);
+    if (conversation) conversation.transfer_reason = reason;
+
     await addSupportLog(`[AI_TRANSFER] Session ${sessionId}: ${reason}`, 'AI_Gateway');
 
     return "حاضر يا فندم! بناءً على طلبك، سأقوم بتحويل المحادثة الآن إلى أحد ممثلي خدمة العملاء وسيرد عليك فور تواجده. [TRANSFER_TO_AGENT] 💬🤝";
@@ -325,6 +357,7 @@ export async function generateAIResponse(
         );
         if (match) {
           console.log(`✨ [AI_CALL_SUCCESS] Matched approved store FAQ (No Gemini API Key needed).`);
+          sessionFailureCounts.set(sessionId, 0);
           return match.answer;
         }
       }
@@ -336,7 +369,7 @@ export async function generateAIResponse(
     return "أهلاً بك في متجر رايفو! 🏍️\nكيف يمكنني مساعدتك اليوم؟ نوفر شحناً مجانياً وسريعاً (2-4 أيام عمل)، وضمان استبدال لمدة 14 يوماً على كافة المنتجات والخوذات واللوازم.";
   }
 
-  // 3. Execute Gemini Generation
+  // 3. Execute Gemini Generation with Automatic Retry
   try {
     const contents = formatChatHistory(conversation?.messages || []);
 
@@ -485,15 +518,15 @@ REMEMBER:
 - DO NOT append [TRANSFER_TO_AGENT] for regular greetings, product inquiries, shipping policies, or standard store questions!
 `;
 
-    // Call Gemini API
-    let response = await ai.models.generateContent({
+    // Call Gemini API with automatic retry
+    let response = await callGeminiWithRetry(ai, {
       model: DEFAULT_GEMINI_MODEL,
       contents: contents,
       config: {
         systemInstruction: dynamicInstructions,
         tools: tools
       }
-    });
+    }, sessionId);
 
     const duration = Date.now() - startTime;
 
@@ -529,13 +562,13 @@ REMEMBER:
       });
 
       // Second call to format
-      response = await ai.models.generateContent({
+      response = await callGeminiWithRetry(ai, {
         model: DEFAULT_GEMINI_MODEL,
         contents: contents,
         config: {
           systemInstruction: dynamicInstructions
         }
-      });
+      }, sessionId);
     }
 
     const rawText = response.text || "";
@@ -547,10 +580,16 @@ REMEMBER:
     console.log(`   ├─ Response Length: ${rawText.length} chars`);
     console.log(`   └─ Has Transfer Tag: ${hasTransferTag}`);
 
+    // Call succeeded: reset failure count
+    sessionFailureCounts.set(sessionId, 0);
+
     if (hasTransferTag) {
+      const reason = `صنّف المساعد الذكي السؤال بأنه يستدعي تدخلاً بشرياً (مثل طلب إلغاء، استرداد، أو استفسار محمي)`;
       console.log(`🔀 [AI_TRANSFER_DECISION] Transfer Triggered: TRUE`);
-      console.log(`   └─ Reason: Gemini model decided to transfer to human support (e.g. unknown answer or sensitive request)`);
-      await addSupportLog(`[AI_TRANSFER] Session ${sessionId}: Gemini model requested transfer to human support.`, 'AI_Gateway');
+      console.log(`   └─ Reason: ${reason}`);
+      await updateConversationTransferReason(conversation.id || sessionId, reason);
+      if (conversation) conversation.transfer_reason = reason;
+      await addSupportLog(`[AI_TRANSFER] Session ${sessionId}: ${reason}`, 'AI_Gateway');
     } else {
       console.log(`✨ [AI_TRANSFER_DECISION] Transfer Triggered: FALSE`);
       console.log(`   └─ Reason: AI successfully answered customer query. Conversation remains in AI_HANDLING.`);
@@ -560,7 +599,7 @@ REMEMBER:
     return rawText || "أهلاً بك! كيف يمكنني مساعدتك اليوم؟";
   } catch (err: any) {
     const duration = Date.now() - startTime;
-    const errorDetails = `Gemini API call failed after ${duration}ms using model [${DEFAULT_GEMINI_MODEL}]. Error: ${err.message || err}`;
+    const errorDetails = `Gemini API call failed after initial attempt & retry (${duration}ms) using model [${DEFAULT_GEMINI_MODEL}]. Error: ${err.message || err}`;
 
     console.error(`❌ [AI_CALL_ERROR] ${errorDetails}`);
     if (err.stack) console.error(`   └─ Stack:`, err.stack);
@@ -568,23 +607,37 @@ REMEMBER:
     // Print all available models for debugging
     listAndLogGeminiModels().catch(() => {});
 
-    await addSupportLog(`[AI_CALL_ERROR] Session ${sessionId}: ${errorDetails}`, 'AI_Gateway');
+    // Increment failure counter
+    const currentFailures = (sessionFailureCounts.get(sessionId) || 0) + 1;
+    sessionFailureCounts.set(sessionId, currentFailures);
 
-    // Transfer on Gemini API Exception
-    console.log(`🔀 [AI_TRANSFER_DECISION] Transfer Triggered: TRUE`);
-    console.log(`   └─ Reason: Gemini API Exception / Failure`);
+    await addSupportLog(`[AI_CALL_ERROR] Session ${sessionId} (Failure count: ${currentFailures}/${MAX_CONSECUTIVE_FAILURES}): ${errorDetails}`, 'AI_Gateway');
 
-    return `عذراً، حدث خطأ أثناء التواصل مع المساعد الذكي (${err.message || 'API Error'}). تم توجيه الطلب إلى فريق الدعم المباشر لمساعدتك. [TRANSFER_TO_AGENT]`;
+    // Only transfer if maximum consecutive failure threshold reached
+    if (currentFailures >= MAX_CONSECUTIVE_FAILURES) {
+      const reason = `تجاوز الحد الأقصى لمحاولات اتصال الذكاء الاصطناعي المتكررة (${currentFailures} محاولات فاشلة)`;
+      console.log(`🔀 [AI_TRANSFER_DECISION] Transfer Triggered: TRUE (Reached max failure threshold: ${currentFailures})`);
+      await updateConversationTransferReason(conversation.id || sessionId, reason);
+      if (conversation) conversation.transfer_reason = reason;
+      await addSupportLog(`[AI_TRANSFER] Session ${sessionId}: ${reason}`, 'AI_Gateway');
+
+      return `عذراً، المساعد الذكي غير متاح حالياً بعد عدة محاولات. تم توجيه طلبك إلى فريق الدعم المباشر لمساعدتك. [TRANSFER_TO_AGENT] 💬🤝`;
+    } else {
+      console.log(`⚠️ [AI_NO_TRANSFER] Session ${sessionId}: Gemini API error caught, but under failure limit (${currentFailures}/${MAX_CONSECUTIVE_FAILURES}). Showing temporary unavailability message.`);
+      return "عذراً، المساعد الذكي غير متاح مؤقتاً بسبب ضغط الخدمة. يرجى إعادة محاولة إرسال سؤالك بعد لحظات. 🏍️";
+    }
   }
 }
 
 // Generate Smart Summary (ai_summary) before transferring to agent
-export async function generateSmartSummary(conversation: any): Promise<string> {
+export async function generateSmartSummary(conversation: any, explicitTransferReason?: string): Promise<string> {
+  const reasonToUse = explicitTransferReason || conversation.transfer_reason || conversation.metadata?.transfer_reason || "طلب التحدث مع الدعم الفني";
+
   const defaultSummary = `اسم العميل: ${conversation.clientName || 'زائر'}
 رقم الطلب: غير محدد
 نوع المشكلة: استفسار عام
 محاولات الذكاء الاصطناعي: محاولة الرد على الاستفسارات تلقائياً
-سبب التحويل: طلب التحدث مع الدعم الفني
+سبب التحويل: ${reasonToUse}
 الحالة: بانتظار موظف`;
 
   const ai = getAi();
@@ -605,7 +658,7 @@ You MUST write the summary clearly in Arabic using this EXACT format:
 رقم الطلب: <Order ID, or 'لا يوجد' if not mentioned>
 نوع المشكلة: <Specific issue type>
 محاولات الذكاء الاصطناعي: <Brief summary of what the AI tried or answered>
-سبب التحويل: <Why the conversation is being transferred to a human agent>
+سبب التحويل: ${reasonToUse}
 الحالة: بانتظار موظف
 
 Do NOT include any other text, labels, introduction, or markdown styling outside this exact format.

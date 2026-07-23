@@ -218,6 +218,7 @@ export async function getConversationsForAgent() {
         lastActive: new Date(row.updated_at).getTime(),
         status: row.status,
         ai_summary: row.ai_summary,
+        transfer_reason: row.transfer_reason || row.metadata?.transfer_reason || '',
         messages: messages
       });
     }
@@ -296,6 +297,48 @@ export async function updateConversationSummary(id: string, summary: string) {
     return res.rows[0];
   } catch (err: any) {
     console.error("Error in updateConversationSummary:", err.message);
+    return null;
+  }
+}
+
+// Update conversation transfer reason
+export async function updateConversationTransferReason(id: string, reason: string) {
+  const dbStatus = getDbStatus();
+  const sessionKey = id.toLowerCase().trim();
+
+  if (!dbStatus.connected) {
+    const localData = loadLocalConversations();
+    if (localData[sessionKey]) {
+      localData[sessionKey].transfer_reason = reason;
+      localData[sessionKey].lastActive = Date.now();
+      saveLocalConversation(sessionKey, localData[sessionKey]);
+      return localData[sessionKey];
+    }
+    return null;
+  }
+
+  try {
+    // Ensure column exists in conversations table if PostgreSQL is connected
+    try {
+      await query(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS transfer_reason TEXT`);
+    } catch (e: any) {
+      // Ignore if column exists or schema altered
+    }
+
+    const res = await query(
+      `UPDATE conversations SET transfer_reason = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *`,
+      [reason, id]
+    );
+    if (res.rows.length === 0) {
+      const resUser = await query(
+        `UPDATE conversations SET transfer_reason = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND status != 'CLOSED' RETURNING *`,
+        [reason, sessionKey]
+      );
+      return resUser.rows[0] || null;
+    }
+    return res.rows[0];
+  } catch (err: any) {
+    console.error("Error in updateConversationTransferReason:", err.message);
     return null;
   }
 }

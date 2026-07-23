@@ -148,7 +148,7 @@ export function initSockets(io: Server) {
             });
 
             // Generate smart summary
-            const summary = await generateSmartSummary(conversation);
+            const summary = await generateSmartSummary(conversation, conversation.transfer_reason);
             await updateConversationSummary(conversation.id, summary);
 
             // Emit status update to customer room only (agents should not see intermediate approval stage)

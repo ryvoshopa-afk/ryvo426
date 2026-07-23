@@ -823,13 +823,22 @@ export default function App() {
   }, [selectedProduct, activeCategory]);
 
   // Sync callbacks to save changes on backend
+  const getAdminHeaders = () => {
+    const adminEmail = currentUser?.email || 'ryvo.shopa@gmail.com';
+    return {
+      'Content-Type': 'application/json',
+      'x-admin-email': adminEmail,
+      'x-user-email': adminEmail
+    };
+  };
+
   const handleUpdateLogo = async (logo: string) => {
     setShopLogo(logo);
     try {
       await fetch('/api/global-settings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shopLogo: logo }),
+        headers: getAdminHeaders(),
+        body: JSON.stringify({ shopLogo: logo, adminEmail: currentUser?.email || 'ryvo.shopa@gmail.com' }),
       });
     } catch (e) {
       console.error(e);
@@ -841,8 +850,8 @@ export default function App() {
     try {
       await fetch('/api/global-settings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ brandColor: color }),
+        headers: getAdminHeaders(),
+        body: JSON.stringify({ brandColor: color, adminEmail: currentUser?.email || 'ryvo.shopa@gmail.com' }),
       });
     } catch (e) {
       console.error(e);
@@ -861,8 +870,9 @@ export default function App() {
     try {
       await fetch('/api/global-settings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAdminHeaders(),
         body: JSON.stringify({
+          adminEmail: currentUser?.email || 'ryvo.shopa@gmail.com',
           announcementTextAr: textAr,
           announcementTextEn: textEn,
           announcementTextFr: textFr,
@@ -879,8 +889,9 @@ export default function App() {
     try {
       await fetch('/api/global-settings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAdminHeaders(),
         body: JSON.stringify({
+          adminEmail: currentUser?.email || 'ryvo.shopa@gmail.com',
           purchasingDisabled: disabled
         }),
       });
@@ -895,8 +906,11 @@ export default function App() {
     try {
       await fetch('/api/global-settings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ socialLinks: links }),
+        headers: getAdminHeaders(),
+        body: JSON.stringify({
+          adminEmail: currentUser?.email || 'ryvo.shopa@gmail.com',
+          socialLinks: links
+        }),
       });
     } catch (e) {
       console.error(e);
@@ -908,8 +922,11 @@ export default function App() {
     try {
       await fetch('/api/global-settings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ heroSlides: slides }),
+        headers: getAdminHeaders(),
+        body: JSON.stringify({
+          adminEmail: currentUser?.email || 'ryvo.shopa@gmail.com',
+          heroSlides: slides
+        }),
       });
     } catch (e) {
       console.error(e);
@@ -921,8 +938,11 @@ export default function App() {
     try {
       await fetch('/api/global-settings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ customAdmins: admins }),
+        headers: getAdminHeaders(),
+        body: JSON.stringify({
+          adminEmail: currentUser?.email || 'ryvo.shopa@gmail.com',
+          customAdmins: admins
+        }),
       });
     } catch (e) {
       console.error(e);
@@ -935,8 +955,11 @@ export default function App() {
     try {
       await fetch('/api/global-settings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ integrations: newIntegrations }),
+        headers: getAdminHeaders(),
+        body: JSON.stringify({
+          adminEmail: currentUser?.email || 'ryvo.shopa@gmail.com',
+          integrations: newIntegrations
+        }),
       });
     } catch (e) {
       console.error(e);

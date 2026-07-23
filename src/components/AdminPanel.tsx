@@ -1976,24 +1976,89 @@ export default function AdminPanel({
     }
   };
 
-  const handleSaveSocialLinks = async () => {
+  const formatAndValidateUrl = (urlStr: string): string => {
+    let trimmed = urlStr.trim();
+    if (!trimmed) return '';
+    if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+      trimmed = 'https://' + trimmed;
+    }
     try {
+      const parsed = new URL(trimmed);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        throw new Error(isRtl ? 'الرابط يجب أن يبدأ بـ http:// أو https://' : 'URL must start with http:// or https://');
+      }
+      return parsed.href;
+    } catch (e: any) {
+      throw new Error(e.message || (isRtl ? 'رابط غير صحيح' : 'Invalid URL format'));
+    }
+  };
+
+  const handleSaveSocialLinks = async (overrideSocials?: Record<string, any>) => {
+    const targetSocials = overrideSocials || editableSocials;
+    try {
+      const formattedSocials: Record<string, any> = {};
+      for (const [platform, val] of Object.entries(targetSocials)) {
+        let url = '';
+        let isEnabled = true;
+        if (val && typeof val === 'object' && val !== null) {
+          url = (val as any).url || '';
+          isEnabled = (val as any).isEnabled !== false;
+        } else if (typeof val === 'string') {
+          url = val;
+        }
+
+        if (url.trim()) {
+          try {
+            const formattedUrl = formatAndValidateUrl(url);
+            formattedSocials[platform] = { url: formattedUrl, isEnabled };
+          } catch (valErr: any) {
+            setToastMessage(`❌ ${isRtl ? 'خطأ في التحقق من البيانات' : 'Validation error'} (${platform}): ${valErr.message}`);
+            return;
+          }
+        } else {
+          formattedSocials[platform] = { url: '', isEnabled };
+        }
+      }
+
+      const adminEmail = currentUser?.email || 'ryvo.shopa@gmail.com';
+      console.log('📱 Saving social links for admin:', adminEmail, formattedSocials);
+
       const res = await fetch('/api/global-settings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ socialLinks: editableSocials }),
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-email': adminEmail,
+          'x-user-email': adminEmail
+        },
+        body: JSON.stringify({
+          adminEmail,
+          socialLinks: formattedSocials
+        }),
       });
-      if (res.ok) {
+
+      const data = await res.json().catch(() => null);
+
+      if (res.ok && data?.success) {
+        setEditableSocials(formattedSocials);
         if (onUpdateSocialLinks) {
-          onUpdateSocialLinks(editableSocials);
+          onUpdateSocialLinks(formattedSocials);
         }
-        logAdminAction("UPDATE_SETTINGS", `Updated global social media links: ${Object.keys(editableSocials).join(', ')}`);
-        setToastMessage(isRtl ? '✅ تم تحديث روابط التواصل الاجتماعي بنجاح!' : '✅ Social media links updated successfully!');
+        logAdminAction("UPDATE_SETTINGS", `Updated global social media links: ${Object.keys(formattedSocials).join(', ')}`);
+        setToastMessage(isRtl ? '✅ تم حفظ روابط التواصل الاجتماعي بنجاح.' : '✅ Social media links saved successfully.');
       } else {
-        setToastMessage(isRtl ? '❌ فشل التحديث' : '❌ Failed to update links');
+        let errMsg = data?.error;
+        if (!errMsg) {
+          if (res.status === 401) errMsg = isRtl ? 'ليس لديك صلاحية الوصول (401 Unauthorized)' : 'Unauthorized (401)';
+          else if (res.status === 403) errMsg = isRtl ? 'ليس لديك صلاحية للتعديل (403 Forbidden)' : 'Forbidden (403)';
+          else if (res.status === 404) errMsg = isRtl ? 'الرابط الخاص بـ API غير موجود (404 Not Found)' : 'API Endpoint Not Found (404)';
+          else if (res.status === 500) errMsg = isRtl ? 'فشل الاتصال بقاعدة البيانات أو خطأ بالخادم (500 Internal Error)' : 'Database or Server Error (500)';
+          else errMsg = isRtl ? `خطأ في الخادم (كود: ${res.status})` : `Server Error (Code: ${res.status})`;
+        }
+        setToastMessage(`❌ ${isRtl ? 'فشل الحفظ' : 'Failed to save'}: ${errMsg}`);
       }
     } catch (e: any) {
-      setToastMessage(`❌ Error: ${e.message}`);
+      console.error("Error saving social links:", e);
+      setToastMessage(`❌ ${isRtl ? 'فشل الاتصال بقاعدة البيانات' : 'Database Connection Error'}: ${e.message || e}`);
     }
   };
 
@@ -2002,14 +2067,19 @@ export default function AdminPanel({
       setToastMessage(isRtl ? '⚠️ يرجى تعبئة اسم المنصة ورابطها!' : '⚠️ Please enter both platform name and URL!');
       return;
     }
-    const key = newPlatformName.toLowerCase().replace(/\s+/g, '_').trim();
-    setEditableSocials(prev => ({
-      ...prev,
-      [key]: { url: newPlatformUrl.trim(), isEnabled: true }
-    }));
-    setNewPlatformName('');
-    setNewPlatformUrl('');
-    setToastMessage(isRtl ? `➕ تم إضافة ${newPlatformName} للقائمة!` : `➕ Added ${newPlatformName} to links!`);
+    try {
+      const validUrl = formatAndValidateUrl(newPlatformUrl);
+      const key = newPlatformName.toLowerCase().replace(/\s+/g, '_').trim();
+      setEditableSocials(prev => ({
+        ...prev,
+        [key]: { url: validUrl, isEnabled: true }
+      }));
+      setNewPlatformName('');
+      setNewPlatformUrl('');
+      setToastMessage(isRtl ? `➕ تم إضافة ${newPlatformName} للقائمة!` : `➕ Added ${newPlatformName} to links!`);
+    } catch (valErr: any) {
+      setToastMessage(`❌ ${isRtl ? 'خطأ في التحقق من الرابط' : 'Invalid URL'}: ${valErr.message}`);
+    }
   };
 
   const handleRemoveSocialPlatform = (key: string) => {
@@ -6238,15 +6308,15 @@ export default function AdminPanel({
                   type="button"
                   onClick={() => {
                     const links = {
-                      facebook: tempFacebook,
-                      twitter: tempTwitter,
-                      instagram: tempInstagram,
-                      youtube: tempYoutube,
-                      snapchat: tempSnapchat,
-                      tiktok: tempTiktok
+                      ...editableSocials,
+                      facebook: { url: tempFacebook, isEnabled: true },
+                      twitter: { url: tempTwitter, isEnabled: true },
+                      instagram: { url: tempInstagram, isEnabled: true },
+                      youtube: { url: tempYoutube, isEnabled: true },
+                      snapchat: { url: tempSnapchat, isEnabled: true },
+                      tiktok: { url: tempTiktok, isEnabled: true }
                     };
-                    onUpdateSocialLinks?.(links);
-                    triggerToast(currentLanguage === 'ar' ? 'تم تحديث روابط حسابات التواصل الاجتماعي!' : 'Social media links updated successfully!');
+                    handleSaveSocialLinks(links);
                   }}
                   className="w-full py-2.5 bg-sky-600 hover:bg-sky-505 text-white font-black text-[11px] rounded-xl transition-all cursor-pointer uppercase shadow-sm"
                 >
@@ -8166,9 +8236,9 @@ export default function AdminPanel({
                         </strong>
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 text-right">
-                        {contactRequests.map((req) => (
+                        {contactRequests.map((req, reqIdx) => (
                           <button
-                            key={req.email}
+                            key={req.email ? `req-${req.email}` : `req-${reqIdx}`}
                             type="button"
                             onClick={() => setSelectedSessionEmail(req.email)}
                             className="p-3 bg-white dark:bg-[#11141D] hover:bg-rose-500 hover:text-white rounded-xl border border-rose-500/20 hover:border-rose-500 flex flex-col gap-1 text-right transition-all cursor-pointer shadow-sm"
@@ -8275,7 +8345,7 @@ export default function AdminPanel({
                             session.email.toLowerCase().includes(term) ||
                             session.lastText.toLowerCase().includes(term)
                           );
-                        }).map((session) => {
+                        }).map((session, sIdx) => {
                           // Look up phone number to construct direct WhatsApp option
                           const regUser = registeredUsers.find(u => u.email?.toLowerCase() === session.email.toLowerCase());
                           const userPhone = regUser?.phone || orders?.find(o => o.user_email?.toLowerCase() === session.email.toLowerCase())?.phone || '';
@@ -8288,7 +8358,7 @@ export default function AdminPanel({
                           const isSelected = selectedSessionEmail.toLowerCase() === session.email.toLowerCase();
 
                           return (
-                            <div key={session.email} className="relative group">
+                            <div key={session.email ? `sess-${session.email}` : `sess-${sIdx}`} className="relative group">
                               <button
                                 type="button"
                                 onClick={() => setSelectedSessionEmail(session.email)}

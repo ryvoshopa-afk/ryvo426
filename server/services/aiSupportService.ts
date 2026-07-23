@@ -10,29 +10,6 @@ dotenv.config();
 const sessionFailureCounts = new Map<string, number>();
 const MAX_CONSECUTIVE_FAILURES = 3;
 
-// Helper to call Gemini with 1 automatic retry on error
-async function callGeminiWithRetry(ai: GoogleGenAI, params: any, sessionId: string): Promise<any> {
-  try {
-    return await ai.models.generateContent(params);
-  } catch (err: any) {
-    console.warn(`⚠️ [GEMINI_RETRY] Initial call failed for session ${sessionId}: ${err.message || err}. Retrying in 500ms...`);
-    await addSupportLog(`[GEMINI_RETRY] Initial call failed for session ${sessionId}: ${err.message || err}. Retrying...`, 'AI_Gateway');
-
-    // Wait 500ms before single automatic retry
-    await new Promise(resolve => setTimeout(resolve, 500));
-
-    try {
-      const retryResponse = await ai.models.generateContent(params);
-      console.log(`✅ [GEMINI_RETRY_SUCCESS] Second attempt succeeded for session ${sessionId}`);
-      await addSupportLog(`[GEMINI_RETRY_SUCCESS] Automatic retry succeeded for session ${sessionId}`, 'AI_Gateway');
-      return retryResponse;
-    } catch (retryErr: any) {
-      console.error(`❌ [GEMINI_RETRY_FAILED] Automatic retry also failed for session ${sessionId}: ${retryErr.message || retryErr}`);
-      throw retryErr;
-    }
-  }
-}
-
 let dbGetter: () => any = () => null;
 
 export function setAiSupportDbGetter(getter: () => any) {
@@ -45,9 +22,16 @@ let getDbInstance: () => any = () => {
 
 let aiInstance: GoogleGenAI | null = null;
 let modelsLoggedSupport = false;
+let cachedAvailableModels: string[] | null = null;
 
 export async function listAndLogGeminiModels(): Promise<string[]> {
   const apiKey = process.env.GEMINI_API_KEY;
+  console.log("=================================================");
+  console.log("🔍 [GEMINI_ENV_CHECK]");
+  console.log("   ├─ GEMINI_API_KEY exists:", !!apiKey);
+  console.log("   └─ GEMINI_MODEL (process.env):", process.env.GEMINI_MODEL || "NOT_SET (defaulting to auto-resolver)");
+  console.log("=================================================");
+
   if (!apiKey) {
     console.warn("⚠️ [GEMINI_MODELS_LIST] Cannot list models: GEMINI_API_KEY is missing in process.env");
     return [];
@@ -68,8 +52,10 @@ export async function listAndLogGeminiModels(): Promise<string[]> {
       console.error(`❌ [GEMINI_MODELS_LIST] REST HTTP ${res.status}:`, errText);
     }
   } catch (err: any) {
-    console.error("❌ [GEMINI_MODELS_LIST] Error fetching models:", err?.message || err);
+    console.error("❌ [GEMINI_MODELS_LIST] Error fetching models:", err);
   }
+
+  cachedAvailableModels = modelNames;
 
   console.log("📋 ========================================================");
   console.log(`📋 [GEMINI_MODELS_LIST] Available models for GEMINI_API_KEY (${modelNames.length} total):`);
@@ -81,6 +67,86 @@ export async function listAndLogGeminiModels(): Promise<string[]> {
   console.log("📋 ========================================================");
 
   return modelNames;
+}
+
+export async function getBestAvailableModel(): Promise<string> {
+  const envModel = process.env.GEMINI_MODEL?.trim();
+  if (envModel) {
+    return envModel.replace(/^models\//, '');
+  }
+
+  if (!cachedAvailableModels) {
+    cachedAvailableModels = await listAndLogGeminiModels();
+  }
+
+  if (cachedAvailableModels && cachedAvailableModels.length > 0) {
+    const cleaned = cachedAvailableModels
+      .map(m => m.replace(/^models\//, ''))
+      .filter(m => !m.includes('2.5-flash-lite')); // Filter out deprecated gemini-2.5-flash-lite
+
+    const preferred = cleaned.find(m => m.includes('3.6-flash'))
+      || cleaned.find(m => m.includes('3.5-flash-lite'))
+      || cleaned.find(m => m.includes('3.5-flash'))
+      || cleaned.find(m => m.includes('2.5-flash'))
+      || cleaned.find(m => m.includes('2.0-flash'))
+      || cleaned[0];
+
+    if (preferred) {
+      console.log(`🎯 [GEMINI_MODEL_RESOLVER] Auto-selected model from API list: "${preferred}"`);
+      return preferred;
+    }
+  }
+
+  return "gemini-2.5-flash";
+}
+
+// Helper to call Gemini with automatic retry and model re-resolution on error
+async function callGeminiWithRetry(ai: GoogleGenAI, params: any, sessionId: string): Promise<any> {
+  const targetModel = params.model || await getBestAvailableModel();
+  params.model = targetModel;
+
+  console.log("=================================================");
+  console.log(`🚀 [GEMINI_REQUEST_START] Session: ${sessionId}`);
+  console.log("   ├─ GEMINI_API_KEY exists:", !!process.env.GEMINI_API_KEY);
+  console.log("   ├─ GEMINI_MODEL (process.env):", process.env.GEMINI_MODEL || "NOT_SET");
+  console.log("   ├─ Active Target Model:", targetModel);
+  console.log("=================================================");
+
+  try {
+    console.log(`🚀 [GEMINI_SENDING_REQUEST] Calling generateContent with model: "${targetModel}"...`);
+    const response = await ai.models.generateContent(params);
+    console.log(`✅ [GEMINI_RESPONSE_RECEIVED] Session ${sessionId}: Response received successfully from model "${targetModel}"`);
+    return response;
+  } catch (err: any) {
+    console.error(`❌ [GEMINI_ERROR_FULL] First attempt failed for session ${sessionId}:`, err);
+    if (err?.stack) console.error(`   └─ Stack:`, err.stack);
+
+    await addSupportLog(`[GEMINI_ERROR] First attempt failed for session ${sessionId}: ${err.message || err}`, 'AI_Gateway');
+
+    // Force fetch model list to log available models in server logs
+    await listAndLogGeminiModels().catch(() => {});
+
+    // Wait 500ms before single automatic retry
+    console.warn(`⚠️ [GEMINI_RETRY] Retrying in 500ms for session ${sessionId}...`);
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    try {
+      // Re-resolve best available model in case previous model failed with 404/NOT_FOUND
+      cachedAvailableModels = null;
+      const fallbackModel = await getBestAvailableModel();
+      params.model = fallbackModel;
+
+      console.log(`🚀 [GEMINI_RETRY_START] Session ${sessionId} retrying request with model: "${fallbackModel}"`);
+      const retryResponse = await ai.models.generateContent(params);
+      console.log(`✅ [GEMINI_RETRY_SUCCESS] Session ${sessionId}: Second attempt succeeded with model "${fallbackModel}"`);
+      await addSupportLog(`[GEMINI_RETRY_SUCCESS] Automatic retry succeeded for session ${sessionId} with model ${fallbackModel}`, 'AI_Gateway');
+      return retryResponse;
+    } catch (retryErr: any) {
+      console.error(`❌ [GEMINI_RETRY_FAILED_FULL] Automatic retry failed for session ${sessionId}:`, retryErr);
+      if (retryErr?.stack) console.error(`   └─ Stack:`, retryErr.stack);
+      throw retryErr;
+    }
+  }
 }
 
 function getAi(): GoogleGenAI | null {
@@ -315,6 +381,7 @@ export async function generateAIResponse(
   const sessionId = conversation?.id || conversation?.sessionId || 'guest';
   const cleanMsg = (newMessage || '').trim();
 
+  console.log(`[STEP 1] Message received: "${cleanMsg}" (Session: ${sessionId})`);
   console.log(`🤖 [AI_CALL_START] Starting AI response generation`);
   console.log(`   ├─ Session ID: ${sessionId}`);
   console.log(`   ├─ Customer Message: "${cleanMsg}"`);
@@ -323,11 +390,12 @@ export async function generateAIResponse(
   await addSupportLog(`[AI_CALL_START] Received message for session ${sessionId}: "${cleanMsg.slice(0, 60)}"`, 'AI_Gateway');
 
   // 1. Check if user explicitly asked for human agent / customer service
-  const humanKeywordsRegex = /(تحدث مع|اريد|أريد|تحويل|كلم|مشرف|بشري|انسان|إنسان|موظف|دعم بشري|عملاء|خدمة العملاء|human agent|talk to agent|speak to human|live support|customer service)/i;
+  const humanKeywordsRegex = /(تحدث مع (موظف|انسان|إنسان|دعم|مشرف|خدمة العملاء)|أريد (التحدث|التواصل|الحديث) مع (موظف|دعم|انسان|إنسان|خدمة العملاء)|اريد (التحدث|التواصل|الحديث) مع (موظف|دعم|انسان|إنسان|خدمة العملاء)|تحويل (إلى|لـ) (موظف|دعم|خدمة العملاء)|كلم (موظف|دعم)|دعم بشري|موظف خدمة العملاء|موظف الدعم|تحدث مع إنسان|تحدث مع انسان|human agent|talk to agent|speak to human|live support|customer service)/i;
   const isExplicitHumanRequest = humanKeywordsRegex.test(cleanMsg);
 
   if (isExplicitHumanRequest) {
     const reason = `طلب العميل صراحة التحدث مع موظف خدمة العملاء: "${cleanMsg}"`;
+    console.log("[STEP X] Escalating to human support. Reason:", reason);
     console.log(`🔀 [AI_TRANSFER_DECISION] Transfer Triggered: TRUE`);
     console.log(`   └─ Reason: ${reason}`);
 
@@ -519,8 +587,9 @@ REMEMBER:
 `;
 
     // Call Gemini API with automatic retry
+    console.log("[STEP 2] Calling Gemini");
     let response = await callGeminiWithRetry(ai, {
-      model: DEFAULT_GEMINI_MODEL,
+      model: await getBestAvailableModel(),
       contents: contents,
       config: {
         systemInstruction: dynamicInstructions,
@@ -563,7 +632,7 @@ REMEMBER:
 
       // Second call to format
       response = await callGeminiWithRetry(ai, {
-        model: DEFAULT_GEMINI_MODEL,
+        model: await getBestAvailableModel(),
         contents: contents,
         config: {
           systemInstruction: dynamicInstructions
@@ -574,6 +643,7 @@ REMEMBER:
     const rawText = response.text || "";
     const hasTransferTag = rawText.includes("[TRANSFER_TO_AGENT]");
 
+    console.log("[STEP 3] Gemini Success");
     console.log(`✅ [AI_CALL_SUCCESS] Gemini call succeeded`);
     console.log(`   ├─ Duration: ${duration}ms`);
     console.log(`   ├─ Response Status: 200 OK`);
@@ -585,6 +655,7 @@ REMEMBER:
 
     if (hasTransferTag) {
       const reason = `صنّف المساعد الذكي السؤال بأنه يستدعي تدخلاً بشرياً (مثل طلب إلغاء، استرداد، أو استفسار محمي)`;
+      console.log("[STEP X] Escalating to human support. Reason:", reason);
       console.log(`🔀 [AI_TRANSFER_DECISION] Transfer Triggered: TRUE`);
       console.log(`   └─ Reason: ${reason}`);
       await updateConversationTransferReason(conversation.id || sessionId, reason);
@@ -598,6 +669,7 @@ REMEMBER:
 
     return rawText || "أهلاً بك! كيف يمكنني مساعدتك اليوم؟";
   } catch (err: any) {
+    console.error("Gemini Error:", err);
     const duration = Date.now() - startTime;
     const errorDetails = `Gemini API call failed after initial attempt & retry (${duration}ms) using model [${DEFAULT_GEMINI_MODEL}]. Error: ${err.message || err}`;
 
@@ -616,6 +688,7 @@ REMEMBER:
     // Only transfer if maximum consecutive failure threshold reached
     if (currentFailures >= MAX_CONSECUTIVE_FAILURES) {
       const reason = `تجاوز الحد الأقصى لمحاولات اتصال الذكاء الاصطناعي المتكررة (${currentFailures} محاولات فاشلة)`;
+      console.log("Escalating to human support. Reason:", reason);
       console.log(`🔀 [AI_TRANSFER_DECISION] Transfer Triggered: TRUE (Reached max failure threshold: ${currentFailures})`);
       await updateConversationTransferReason(conversation.id || sessionId, reason);
       if (conversation) conversation.transfer_reason = reason;
@@ -671,17 +744,24 @@ ${messagesText}
 Please generate the structured summary now. Keep it brief, factual, and strictly compliant.
 `;
 
-    const response = await ai.models.generateContent({
-      model: DEFAULT_GEMINI_MODEL,
+    const targetModel = await getBestAvailableModel();
+    console.log("=================================================");
+    console.log(`🤖 [GEMINI_SUMMARY_CALL] Model: ${targetModel}`);
+    console.log("   ├─ GEMINI_API_KEY exists:", !!process.env.GEMINI_API_KEY);
+    console.log("   ├─ GEMINI_MODEL (process.env):", process.env.GEMINI_MODEL || "NOT_SET");
+    console.log("=================================================");
+
+    const response = await callGeminiWithRetry(ai, {
+      model: targetModel,
       contents: userPrompt,
       config: {
         systemInstruction: systemPrompt
       }
-    });
+    }, 'summary');
 
     return response.text?.trim() || defaultSummary;
   } catch (err: any) {
-    console.error("Error generating smart summary:", err);
+    console.error("❌ [GEMINI_SUMMARY_ERROR] Error generating smart summary:", err);
     return defaultSummary;
   }
 }

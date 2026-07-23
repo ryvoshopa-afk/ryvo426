@@ -131,6 +131,11 @@ export async function getOrCreateConversation(sessionId: string, clientMetadata:
   }
 }
 
+function isUuid(str: string): boolean {
+  if (!str || typeof str !== 'string') return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str.trim());
+}
+
 // Get a single conversation by UUID or local session ID
 export async function getConversationById(id: string) {
   const dbStatus = getDbStatus();
@@ -140,7 +145,10 @@ export async function getConversationById(id: string) {
   }
 
   try {
-    const selectRes = await query(`SELECT * FROM conversations WHERE id = $1`, [id]);
+    let selectRes: any = { rows: [] };
+    if (isUuid(id)) {
+      selectRes = await query(`SELECT * FROM conversations WHERE id = $1`, [id]);
+    }
     if (selectRes.rows.length === 0) {
       // Check if it's user_id instead of UUID
       const selectUserRes = await query(
@@ -148,10 +156,10 @@ export async function getConversationById(id: string) {
         [id.toLowerCase().trim()]
       );
       if (selectUserRes.rows.length === 0) return null;
-      id = selectUserRes.rows[0].id;
+      selectRes = selectUserRes;
     }
 
-    const dbConv = selectRes.rows[0] || (await query(`SELECT * FROM conversations WHERE id = $1`, [id])).rows[0];
+    const dbConv = selectRes.rows[0];
     const msgRes = await query(`SELECT * FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC`, [dbConv.id]);
     const messages = msgRes.rows.map(mapMessage);
 
@@ -160,16 +168,17 @@ export async function getConversationById(id: string) {
       sessionId: dbConv.user_id,
       clientEmail: dbConv.user_id.includes('@') ? dbConv.user_id : 'guest@ryvo.co',
       clientName: dbConv.user_id.split('@')[0] || 'زائر',
-      country: dbConv.metadata.country || 'SA',
-      language: dbConv.metadata.language || 'ar',
-      device: dbConv.metadata.device || 'Desktop',
-      os: dbConv.metadata.os || 'Windows',
-      browser: dbConv.metadata.browser || 'Chrome',
-      ip: dbConv.metadata.ip || '127.0.0.1',
+      country: dbConv.metadata?.country || 'SA',
+      language: dbConv.metadata?.language || 'ar',
+      device: dbConv.metadata?.device || 'Desktop',
+      os: dbConv.metadata?.os || 'Windows',
+      browser: dbConv.metadata?.browser || 'Chrome',
+      ip: dbConv.metadata?.ip || '127.0.0.1',
       createdAt: dbConv.created_at,
       lastActive: new Date(dbConv.updated_at).getTime(),
       status: dbConv.status,
-      ai_summary: dbConv.ai_summary,
+      ai_summary: dbConv.ai_summary || '',
+      transfer_reason: dbConv.transfer_reason || dbConv.metadata?.transfer_reason || '',
       messages: messages
     };
   } catch (err: any) {
@@ -248,10 +257,13 @@ export async function updateConversationStatus(id: string, status: string) {
   }
 
   try {
-    const res = await query(
-      `UPDATE conversations SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *`,
-      [status, id]
-    );
+    let res: any = { rows: [] };
+    if (isUuid(id)) {
+      res = await query(
+        `UPDATE conversations SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *`,
+        [status, id]
+      );
+    }
     if (res.rows.length === 0) {
       // Check if ID is user_id session key
       const resUser = await query(
@@ -283,10 +295,13 @@ export async function updateConversationSummary(id: string, summary: string) {
   }
 
   try {
-    const res = await query(
-      `UPDATE conversations SET ai_summary = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *`,
-      [summary, id]
-    );
+    let res: any = { rows: [] };
+    if (isUuid(id)) {
+      res = await query(
+        `UPDATE conversations SET ai_summary = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *`,
+        [summary, id]
+      );
+    }
     if (res.rows.length === 0) {
       const resUser = await query(
         `UPDATE conversations SET ai_summary = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND status != 'CLOSED' RETURNING *`,
@@ -325,10 +340,13 @@ export async function updateConversationTransferReason(id: string, reason: strin
       // Ignore if column exists or schema altered
     }
 
-    const res = await query(
-      `UPDATE conversations SET transfer_reason = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *`,
-      [reason, id]
-    );
+    let res: any = { rows: [] };
+    if (isUuid(id)) {
+      res = await query(
+        `UPDATE conversations SET transfer_reason = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *`,
+        [reason, id]
+      );
+    }
     if (res.rows.length === 0) {
       const resUser = await query(
         `UPDATE conversations SET transfer_reason = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND status != 'CLOSED' RETURNING *`,
@@ -383,7 +401,7 @@ export async function addMessage(
   try {
     // Resolve conversation ID if it's user_id session key
     let actualConvId = conversationId;
-    if (!conversationId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)) {
+    if (!isUuid(conversationId)) {
       const convRes = await query(
         `SELECT id FROM conversations WHERE user_id = $1 AND status != 'CLOSED' LIMIT 1`,
         [conversationId.toLowerCase().trim()]

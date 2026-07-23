@@ -96,8 +96,15 @@ export function initSockets(io: Server) {
 
       // 2. AI Gateway Guard checking
       if (sender === 'user') {
-        // Customer sending message
-        if (conversation.status === 'AI_HANDLING') {
+        console.log(`[STEP 1] Message received: "${text}" from session ${cleanSessionId}`);
+
+        // Re-open closed conversation if user sends a message
+        if (conversation.status === 'CLOSED') {
+          await updateConversationStatus(conversation.id, 'AI_HANDLING');
+          conversation.status = 'AI_HANDLING';
+        }
+
+        if (conversation.status === 'AI_HANDLING' || conversation.status === 'PENDING_CUSTOMER_APPROVAL') {
           // Save and broadcast customer message to client only
           const savedUserMsg = await addMessage(conversation.id, 'customer', msgType, content, false);
           if (savedUserMsg) {
@@ -132,11 +139,15 @@ export function initSockets(io: Server) {
           // Save AI message to DB
           const savedAiMsg = await addMessage(conversation.id, 'ai', 'text', cleanAiReply, false);
           if (savedAiMsg) {
+            console.log(`[STEP 4] Sending response to client`);
             io.to(clientRoom).emit('message_received', savedAiMsg);
             // DO NOT notify agents_room during AI_HANDLING
           }
 
           if (shouldTransfer) {
+            const reason = conversation.transfer_reason || "طلب تحويل إلى موظف دعم بشري";
+            console.log("[STEP X] Escalating to human support. Reason:", reason);
+
             // Transition to PENDING_CUSTOMER_APPROVAL
             await updateConversationStatus(conversation.id, 'PENDING_CUSTOMER_APPROVAL');
             
@@ -148,12 +159,18 @@ export function initSockets(io: Server) {
             });
 
             // Generate smart summary
-            const summary = await generateSmartSummary(conversation, conversation.transfer_reason);
+            const summary = await generateSmartSummary(conversation, reason);
             await updateConversationSummary(conversation.id, summary);
 
             // Emit status update to customer room only (agents should not see intermediate approval stage)
             io.to(clientRoom).emit('status_updated', { status: 'PENDING_CUSTOMER_APPROVAL', ai_summary: summary });
+          } else {
+            if (conversation.status !== 'AI_HANDLING') {
+              await updateConversationStatus(conversation.id, 'AI_HANDLING');
+              io.to(clientRoom).emit('status_updated', { status: 'AI_HANDLING' });
+            }
           }
+          console.log(`[STEP 5] Return completed`);
 
         } else {
           // Conversation is handled by a human or queued for human

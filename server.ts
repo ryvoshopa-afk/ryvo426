@@ -3542,6 +3542,12 @@ let serverModelsLogged = false;
 
 async function listAndLogGeminiModelsServer(): Promise<string[]> {
   const apiKey = process.env.GEMINI_API_KEY;
+  console.log("=================================================");
+  console.log("🔍 [GEMINI_SERVER_ENV_CHECK]");
+  console.log("GEMINI_API_KEY exists:", !!apiKey);
+  console.log("GEMINI_MODEL:", process.env.GEMINI_MODEL || "NOT_SET (defaulting to gemini-2.5-flash-lite)");
+  console.log("=================================================");
+
   if (!apiKey) {
     console.warn("⚠️ [GEMINI_MODELS_LIST] Cannot list models: GEMINI_API_KEY environment variable is missing.");
     return [];
@@ -3562,7 +3568,7 @@ async function listAndLogGeminiModelsServer(): Promise<string[]> {
       console.error(`❌ [GEMINI_MODELS_LIST] REST HTTP ${res.status}:`, errText);
     }
   } catch (err: any) {
-    console.error("❌ [GEMINI_MODELS_LIST] Error fetching models:", err?.message || err);
+    console.error("❌ [GEMINI_MODELS_LIST] Error fetching models:", err);
   }
 
   console.log("📋 ========================================================");
@@ -3575,6 +3581,32 @@ async function listAndLogGeminiModelsServer(): Promise<string[]> {
   console.log("📋 ========================================================");
 
   return modelNames;
+}
+
+async function getBestAvailableModelServer(): Promise<string> {
+  const envModel = process.env.GEMINI_MODEL?.trim();
+  if (envModel) {
+    return envModel.replace(/^models\//, '');
+  }
+
+  if (!serverModelsLogged) {
+    serverModelsLogged = true;
+    const models = await listAndLogGeminiModelsServer();
+    if (models.length > 0) {
+      const cleaned = models
+        .map(m => m.replace(/^models\//, ''))
+        .filter(m => !m.includes('2.5-flash-lite'));
+
+      const preferred = cleaned.find(m => m.includes('3.6-flash'))
+        || cleaned.find(m => m.includes('3.5-flash-lite'))
+        || cleaned.find(m => m.includes('3.5-flash'))
+        || cleaned.find(m => m.includes('2.5-flash'))
+        || cleaned.find(m => m.includes('2.0-flash'))
+        || cleaned[0];
+      return preferred;
+    }
+  }
+  return "gemini-2.5-flash";
 }
 
 function getGeminiServerAi(): GoogleGenAI | null {
@@ -3667,18 +3699,30 @@ IMPORTANT INSTRUCTIONS:
         { role: "user", parts: [{ text: message }] }
       ];
 
-      const defaultModel = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
+      const targetModel = await getBestAvailableModelServer();
+
+      console.log("=================================================");
+      console.log("🤖 [/api/chat-gemini] PRE-CALL CHECK:");
+      console.log("   ├─ GEMINI_API_KEY exists:", !!process.env.GEMINI_API_KEY);
+      console.log("   ├─ GEMINI_MODEL (process.env):", process.env.GEMINI_MODEL || "NOT_SET");
+      console.log("   └─ Active Target Model:", targetModel);
+      console.log("=================================================");
+
+      console.log(`🚀 [GEMINI_SENDING_REQUEST] Calling generateContent with model "${targetModel}"...`);
       const response = await ai.models.generateContent({
-        model: defaultModel,
+        model: targetModel,
         contents: contents,
         config: {
           systemInstruction: systemPrompt,
         }
       });
+      console.log(`✅ [GEMINI_RESPONSE_RECEIVED] Received response from Gemini model "${targetModel}"`);
 
       return res.json({ response: response.text });
     } catch (e: any) {
-      console.error("Gemini Support Chat Error, falling back to smart regex:", e);
+      console.error("❌ [GEMINI_ERROR_FULL] Gemini Support Chat Error:", e);
+      if (e?.stack) console.error("   └─ Stack:", e.stack);
+      listAndLogGeminiModelsServer().catch(() => {});
       // Fallback
     }
   }
@@ -3906,7 +3950,14 @@ app.post("/api/support/conversations/:id/message", async (req, res) => {
     const content = attachment ? attachment.url : message;
 
     if (sender === 'user') {
-      if (conversation.status === 'AI_HANDLING') {
+      console.log(`[STEP 1] Message received: "${message}" from session ${decodedId}`);
+
+      if (conversation.status === 'CLOSED') {
+        await dbSupportService.updateConversationStatus(conversation.id, 'AI_HANDLING');
+        conversation.status = 'AI_HANDLING';
+      }
+
+      if (conversation.status === 'AI_HANDLING' || conversation.status === 'PENDING_CUSTOMER_APPROVAL') {
         const savedUserMsg = await dbSupportService.addMessage(conversation.id, 'customer', msgType, content, false);
         if (savedUserMsg && io) {
           io.to(`conversation_${decodedId}`).emit('message_received', savedUserMsg);
@@ -3932,26 +3983,38 @@ app.post("/api/support/conversations/:id/message", async (req, res) => {
 
         const savedAiMsg = await dbSupportService.addMessage(conversation.id, 'ai', 'text', cleanAiReply, false);
         if (savedAiMsg && io) {
+          console.log(`[STEP 4] Sending response to client`);
           io.to(`conversation_${decodedId}`).emit('message_received', savedAiMsg);
           // GATED: DO NOT emit AI message to agents_room while AI_HANDLING
         }
 
         if (shouldTransfer) {
+          const reason = conversation.transfer_reason || "طلب تحويل إلى موظف دعم بشري";
+          console.log("[STEP X] Escalating to human support. Reason:", reason);
+
           await dbSupportService.updateConversationStatus(conversation.id, 'PENDING_CUSTOMER_APPROVAL');
           conversation.messages.push({
             id: savedAiMsg?.id || `temp-ai-${Date.now()}`,
             sender: 'support',
             text: cleanAiReply
           });
-          const summary = await generateSmartSummary(conversation, conversation.transfer_reason);
+          const summary = await generateSmartSummary(conversation, reason);
           await dbSupportService.updateConversationSummary(conversation.id, summary);
 
           if (io) {
             // Customer room only receives approval state
             io.to(`conversation_${decodedId}`).emit('status_updated', { status: 'PENDING_CUSTOMER_APPROVAL', ai_summary: summary });
           }
+        } else {
+          if (conversation.status !== 'AI_HANDLING') {
+            await dbSupportService.updateConversationStatus(conversation.id, 'AI_HANDLING');
+            if (io) {
+              io.to(`conversation_${decodedId}`).emit('status_updated', { status: 'AI_HANDLING' });
+            }
+          }
         }
 
+        console.log(`[STEP 5] Return completed`);
         return res.json({ success: true, conversation, aiReplied: true, aiResponseText: cleanAiReply });
       } else {
         const savedUserMsg = await dbSupportService.addMessage(conversation.id, 'customer', msgType, content, false);
@@ -4204,15 +4267,26 @@ Keep it incredibly exciting, tailored for motorcycle/bike action enthusiasts!`;
   const ai = getGeminiServerAi();
   if (ai) {
     try {
-      const defaultModel = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
+      const targetModel = await getBestAvailableModelServer();
+      console.log("=================================================");
+      console.log("🤖 [/api/marketing-generate-script] PRE-CALL CHECK:");
+      console.log("   ├─ GEMINI_API_KEY exists:", !!process.env.GEMINI_API_KEY);
+      console.log("   ├─ GEMINI_MODEL (process.env):", process.env.GEMINI_MODEL || "NOT_SET");
+      console.log("   └─ Active Target Model:", targetModel);
+      console.log("=================================================");
+
+      console.log(`🚀 [GEMINI_SENDING_REQUEST] Calling generateContent with model "${targetModel}"...`);
       const response = await ai.models.generateContent({
-        model: defaultModel,
+        model: targetModel,
         contents: userPrompt,
         config: { systemInstruction: systemPrompt }
       });
+      console.log(`✅ [GEMINI_RESPONSE_RECEIVED] Received response from Gemini model "${targetModel}"`);
       return res.json({ script: response.text });
-    } catch (e) {
-      console.error("Gemini script writer failed:", e);
+    } catch (e: any) {
+      console.error("❌ [GEMINI_ERROR_FULL] Gemini script writer failed:", e);
+      if (e?.stack) console.error("   └─ Stack:", e.stack);
+      listAndLogGeminiModelsServer().catch(() => {});
     }
   }
 
@@ -4279,15 +4353,26 @@ You generate highly engaging, informative, and viral posts containing relevant e
   const ai = getGeminiServerAi();
   if (ai) {
     try {
-      const defaultModel = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
+      const targetModel = await getBestAvailableModelServer();
+      console.log("=================================================");
+      console.log("🤖 [/api/marketing-generate-content] PRE-CALL CHECK:");
+      console.log("   ├─ GEMINI_API_KEY exists:", !!process.env.GEMINI_API_KEY);
+      console.log("   ├─ GEMINI_MODEL (process.env):", process.env.GEMINI_MODEL || "NOT_SET");
+      console.log("   └─ Active Target Model:", targetModel);
+      console.log("=================================================");
+
+      console.log(`🚀 [GEMINI_SENDING_REQUEST] Calling generateContent with model "${targetModel}"...`);
       const response = await ai.models.generateContent({
-        model: defaultModel,
+        model: targetModel,
         contents: userPrompt,
         config: { systemInstruction: systemPrompt }
       });
+      console.log(`✅ [GEMINI_RESPONSE_RECEIVED] Received response from Gemini model "${targetModel}"`);
       return res.json({ content: response.text });
-    } catch (e) {
-      console.error("Gemini content planner failed:", e);
+    } catch (e: any) {
+      console.error("❌ [GEMINI_ERROR_FULL] Gemini content planner failed:", e);
+      if (e?.stack) console.error("   └─ Stack:", e.stack);
+      listAndLogGeminiModelsServer().catch(() => {});
     }
   }
 
@@ -4427,15 +4512,26 @@ Please propose custom recommendations. Keep descriptions short, snappy, and very
   const ai = getGeminiServerAi();
   if (ai) {
     try {
-      const defaultModel = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
+      const targetModel = await getBestAvailableModelServer();
+      console.log("=================================================");
+      console.log("🤖 [/api/marketing-insight] PRE-CALL CHECK:");
+      console.log("   ├─ GEMINI_API_KEY exists:", !!process.env.GEMINI_API_KEY);
+      console.log("   ├─ GEMINI_MODEL (process.env):", process.env.GEMINI_MODEL || "NOT_SET");
+      console.log("   └─ Active Target Model:", targetModel);
+      console.log("=================================================");
+
+      console.log(`🚀 [GEMINI_SENDING_REQUEST] Calling generateContent with model "${targetModel}"...`);
       const response = await ai.models.generateContent({
-        model: defaultModel,
+        model: targetModel,
         contents: userPrompt,
         config: { systemInstruction: systemPrompt }
       });
+      console.log(`✅ [GEMINI_RESPONSE_RECEIVED] Received response from Gemini model "${targetModel}"`);
       return res.json({ insight: response.text });
-    } catch (e) {
-      console.error("Gemini business insight planner failed:", e);
+    } catch (e: any) {
+      console.error("❌ [GEMINI_ERROR_FULL] Gemini business insight planner failed:", e);
+      if (e?.stack) console.error("   └─ Stack:", e.stack);
+      listAndLogGeminiModelsServer().catch(() => {});
     }
   }
 
@@ -4462,8 +4558,7 @@ Please propose custom recommendations. Keep descriptions short, snappy, and very
 
 // 5. Multi-Purpose AI Marketing Agent Generator Endpoint
 app.post("/api/marketing-agent-generate", async (req, res) => {
-  const defaultModel = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
-  const { prompt, systemInstruction = "You are a helpful assistant", model = defaultModel } = req.body;
+  const { prompt, systemInstruction = "You are a helpful assistant" } = req.body;
 
   if (!prompt) {
     return res.status(400).json({ error: "Prompt is required" });
@@ -4472,15 +4567,26 @@ app.post("/api/marketing-agent-generate", async (req, res) => {
   const ai = getGeminiServerAi();
   if (ai) {
     try {
-      const targetModel = (model && (model.includes("2.5") || model.includes("1.5"))) ? defaultModel : (model || defaultModel);
+      const targetModel = await getBestAvailableModelServer();
+      console.log("=================================================");
+      console.log("🤖 [/api/marketing-agent-generate] PRE-CALL CHECK:");
+      console.log("   ├─ GEMINI_API_KEY exists:", !!process.env.GEMINI_API_KEY);
+      console.log("   ├─ GEMINI_MODEL (process.env):", process.env.GEMINI_MODEL || "NOT_SET");
+      console.log("   └─ Active Target Model:", targetModel);
+      console.log("=================================================");
+
+      console.log(`🚀 [GEMINI_SENDING_REQUEST] Calling generateContent with model "${targetModel}"...`);
       const response = await ai.models.generateContent({
         model: targetModel,
         contents: prompt,
         config: { systemInstruction: systemInstruction }
       });
+      console.log(`✅ [GEMINI_RESPONSE_RECEIVED] Received response from Gemini model "${targetModel}"`);
       return res.json({ response: response.text });
-    } catch (e) {
-      console.error("Gemini marketing generator failed:", e);
+    } catch (e: any) {
+      console.error("❌ [GEMINI_ERROR_FULL] Gemini marketing generator failed:", e);
+      if (e?.stack) console.error("   └─ Stack:", e.stack);
+      listAndLogGeminiModelsServer().catch(() => {});
     }
   }
 

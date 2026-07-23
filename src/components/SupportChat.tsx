@@ -621,11 +621,18 @@ export default function SupportChat({ currentLanguage, currentUser, onClose }: S
 
         {/* ── QUEUED_FOR_HUMAN Banner ───────────────────────────────────────── */}
         {convStatus === 'QUEUED_FOR_HUMAN' && (
-          <div className="bg-amber-500/10 border-b border-amber-500/20 p-3 text-center flex-shrink-0">
-            <div className="flex items-center justify-center gap-2 text-amber-400 font-bold text-xs">
+          <div className="bg-amber-500/10 border-b border-amber-500/20 p-3 flex items-center justify-between gap-2 flex-shrink-0">
+            <div className="flex items-center gap-2 text-amber-400 font-bold text-xs">
               <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
-              {isRtl ? '⏳ أنت في قائمة الانتظار. سيتصل بك موظف الدعم قريباً...' : '⏳ You are in queue. A support agent will be with you shortly...'}
+              <span>{isRtl ? '⏳ أنت في قائمة الانتظار. سيتصل بك موظف الدعم قريباً...' : '⏳ You are in queue. A support agent will be with you shortly...'}</span>
             </div>
+            <button
+              onClick={handleDeclineTransfer}
+              className="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold rounded-lg text-xs transition border border-amber-500/30 flex items-center gap-1 shrink-0"
+            >
+              <Bot className="w-3.5 h-3.5" />
+              <span>{isRtl ? 'العودة للمساعد الذكي' : 'Return to AI'}</span>
+            </button>
           </div>
         )}
 

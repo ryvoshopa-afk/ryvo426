@@ -680,9 +680,8 @@ export default function App() {
     let delayTimer: any;
     const fetchAndSetupAds = async () => {
       try {
-        const res = await fetch('/api/ads');
-        if (res.ok) {
-          const adsList = await res.json();
+        const adsList = await smartFetch('/api/ads', { useCache: true, cacheTtl: 30000, maxRetries: 2 });
+        if (Array.isArray(adsList)) {
           setAds(adsList);
           
           // Determine the first eligible ad to display
@@ -1000,12 +999,15 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem('ryvo_products', JSON.stringify(products));
-    // Synchronize with server for dynamic sitemap.xml updates
-    fetch('/api/sync-products', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ products })
-    }).catch(err => console.error('Error syncing products with backend:', err));
+    // Synchronize with server for dynamic sitemap.xml updates using smartFetch
+    if (products && products.length > 0) {
+      smartFetch('/api/sync-products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ products }),
+        maxRetries: 2
+      }).catch(err => console.warn('Product sync with server paused:', err?.message || err));
+    }
   }, [products]);
 
   useEffect(() => {
@@ -1028,36 +1030,27 @@ export default function App() {
   useEffect(() => {
     const loadBackendData = async () => {
       try {
-        const prodRes = await fetch('/api/products');
-        if (prodRes.ok) {
-          const prodData = await prodRes.json();
-          if (prodData && prodData.length > 0) {
-            setProducts(prodData);
-          }
+        const prodData = await smartFetch('/api/products', { useCache: true, cacheTtl: 10000, maxRetries: 2 });
+        if (Array.isArray(prodData) && prodData.length > 0) {
+          setProducts(prodData);
         }
       } catch (e: any) {
         console.warn('Unable to load products from server (server may be booting/restarting):', e.message || e);
       }
 
       try {
-        const ordRes = await fetch('/api/orders');
-        if (ordRes.ok) {
-          const ordData = await ordRes.json();
-          if (ordData && ordData.length > 0) {
-            setOrders(ordData);
-          }
+        const ordData = await smartFetch('/api/orders', { useCache: true, cacheTtl: 10000, maxRetries: 2 });
+        if (Array.isArray(ordData) && ordData.length > 0) {
+          setOrders(ordData);
         }
       } catch (e: any) {
         console.warn('Unable to load orders from server (server may be booting/restarting):', e.message || e);
       }
 
       try {
-        const revRes = await fetch('/api/reviews');
-        if (revRes.ok) {
-          const revData = await revRes.json();
-          if (revData && revData.length > 0) {
-            setReviews(revData);
-          }
+        const revData = await smartFetch('/api/reviews', { useCache: true, cacheTtl: 10000, maxRetries: 2 });
+        if (Array.isArray(revData) && revData.length > 0) {
+          setReviews(revData);
         }
       } catch (e: any) {
         console.warn('Unable to load reviews from server (server may be booting/restarting):', e.message || e);

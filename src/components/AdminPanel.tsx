@@ -1298,7 +1298,32 @@ export default function AdminPanel({
   const [selectedSessionEmail, setSelectedSessionEmail] = useState<string>('guest@ryvo.co');
   const [supportSearchTerm, setSupportSearchTerm] = useState('');
   const [supportSelectedOrderId, setSupportSelectedOrderId] = useState<string>('');
-  const [supportSubTab, setSupportSubTab] = useState<'chat' | 'notifications' | 'settings' | 'knowledge' | 'logs'>('chat');
+  const [supportSubTab, setSupportSubTab] = useState<'chat' | 'quickReplies' | 'notifications' | 'settings' | 'knowledge' | 'logs'>('chat');
+  
+  // Quick Replies (Canned Responses) state
+  const [quickReplySearchTerm, setQuickReplySearchTerm] = useState('');
+  const [quickReplyCategoryFilter, setQuickReplyCategoryFilter] = useState<string>('الكل');
+  const [quickReplyScopeFilter, setQuickReplyScopeFilter] = useState<'all' | 'shared' | 'agent'>('all');
+  const [editingQuickReply, setEditingQuickReply] = useState<any | null>(null);
+  const [showQuickReplyModal, setShowQuickReplyModal] = useState(false);
+
+  // Quick Reply Form fields
+  const [qrCategory, setQrCategory] = useState<string>('عام');
+  const [qrTitleAr, setQrTitleAr] = useState('');
+  const [qrTitleEn, setQrTitleEn] = useState('');
+  const [qrTextAr, setQrTextAr] = useState('');
+  const [qrTextEn, setQrTextEn] = useState('');
+  const [qrScope, setQrScope] = useState<'shared' | 'agent'>('shared');
+  const [qrKeywords, setQrKeywords] = useState('');
+  const [qrIsActive, setQrIsActive] = useState(true);
+
+  // Customer Suggestions state
+  const [editingSuggestion, setEditingSuggestion] = useState<any | null>(null);
+  const [showSuggestionModal, setShowSuggestionModal] = useState(false);
+  const [sugTextAr, setSugTextAr] = useState('');
+  const [sugTextEn, setSugTextEn] = useState('');
+  const [sugIcon, setSugIcon] = useState('📦');
+  const [sugIsActive, setSugIsActive] = useState(true);
   const [knowledgeSuggestions, setKnowledgeSuggestions] = useState<any[]>([]);
   const [isFetchingKnowledge, setIsFetchingKnowledge] = useState(false);
   const [supportLogs, setSupportLogs] = useState<any[]>([]);
@@ -1371,7 +1396,6 @@ export default function AdminPanel({
     }
   }, [adminTab, supportSubTab]);
   const [supportCol4Tab, setSupportCol4Tab] = useState<'logistics' | 'profile'>('logistics');
-  const [editingSuggestion, setEditingSuggestion] = useState<any | null>(null);
   const [suggTextAr, setSuggTextAr] = useState('');
   const [suggTextEn, setSuggTextEn] = useState('');
   const [suggIcon, setSuggIcon] = useState('💡');
@@ -1609,8 +1633,9 @@ export default function AdminPanel({
     );
   };
 
-  const sendSupportReply = async () => {
-    if (!supportReply.trim()) return;
+  const sendSupportReply = async (textToSend?: string) => {
+    const messageContent = textToSend ?? supportReply;
+    if (!messageContent.trim()) return;
     
     let clientName = '';
     if (selectedSessionEmail === 'guest@ryvo.co') {
@@ -1636,7 +1661,7 @@ export default function AdminPanel({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: supportReply,
+          message: messageContent,
           sender: 'support',
           clientName: clientName,
           clientEmail: selectedSessionEmail
@@ -1644,7 +1669,9 @@ export default function AdminPanel({
       });
 
       if (res.ok) {
-        setSupportReply('');
+        if (!textToSend) {
+          setSupportReply('');
+        }
         // Poll immediately to show message instantly
         const cRes = await fetch('/api/support/conversations');
         if (cRes.ok) {
@@ -6908,7 +6935,18 @@ export default function AdminPanel({
                     : 'border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-white'
                 }`}
               >
-                <span>⚙️ إعدادات الدعم والاقتراحات</span>
+                <span>⚙️ إعدادات الدعم العام</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSupportSubTab('quickReplies')}
+                className={`flex-1 py-3 text-xs font-black tracking-wide uppercase transition-all border-b-2 flex items-center justify-center gap-2 cursor-pointer ${
+                  supportSubTab === 'quickReplies'
+                    ? 'border-emerald-500 text-emerald-500'
+                    : 'border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-white'
+                }`}
+              >
+                <span>⚡ الردود السريعة والذكية</span>
               </button>
               <button
                 type="button"
@@ -7287,6 +7325,372 @@ export default function AdminPanel({
                             </div>
                           ))
                         )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+
+              if (supportSubTab === 'quickReplies') {
+                const currentQuickReplies = supportSettings?.quickReplies || [];
+                const currentSuggestions = supportSettings?.suggestions || [];
+
+                // Filter quick replies
+                const filteredQuickReplies = currentQuickReplies.filter((qr: any) => {
+                  const matchesCategory = quickReplyCategoryFilter === 'الكل' || qr.category === quickReplyCategoryFilter;
+                  const matchesScope = quickReplyScopeFilter === 'all' || qr.scope === quickReplyScopeFilter;
+                  const searchLower = quickReplySearchTerm.toLowerCase().trim();
+                  const matchesSearch = !searchLower ||
+                    (qr.titleAr && qr.titleAr.toLowerCase().includes(searchLower)) ||
+                    (qr.titleEn && qr.titleEn.toLowerCase().includes(searchLower)) ||
+                    (qr.textAr && qr.textAr.toLowerCase().includes(searchLower)) ||
+                    (qr.textEn && qr.textEn.toLowerCase().includes(searchLower));
+                  return matchesCategory && matchesScope && matchesSearch;
+                });
+
+                const categoriesList = ['الكل', 'عام', 'طلبات', 'شحن', 'دفع', 'استرجاع', 'تقنية'];
+
+                // Helper to save quick replies to backend
+                const updateQuickRepliesList = async (newList: any[]) => {
+                  const newSettings = { ...supportSettings, quickReplies: newList };
+                  await handleSaveSupportSettings(newSettings);
+                };
+
+                // Helper to save suggestions list to backend
+                const updateSuggestionsList = async (newList: any[]) => {
+                  const newSettings = { ...supportSettings, suggestions: newList };
+                  await handleSaveSupportSettings(newSettings);
+                };
+
+                return (
+                  <div className="space-y-8 font-sans text-right">
+                    {/* Header Banner */}
+                    <div className="bg-gradient-to-r from-emerald-600 via-teal-600 to-sky-600 rounded-3xl p-6 text-white shadow-lg flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xl">⚡</span>
+                          <h3 className="text-lg font-black">{isRtl ? 'لوحة إدارة الردود والاقتراحات السريعة' : 'Quick Replies & Suggestions Console'}</h3>
+                        </div>
+                        <p className="text-xs text-emerald-100 font-medium mt-1">
+                          {isRtl ? 'قم بإدارة وتخصيص الردود السريعة للموظفين واقتراحات العميل التفاعلية بكل سهولة' : 'Manage canned agent replies & interactive customer suggestions'}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingQuickReply(null);
+                            setQrCategory('عام');
+                            setQrTitleAr('');
+                            setQrTitleEn('');
+                            setQrTextAr('');
+                            setQrTextEn('');
+                            setQrScope('shared');
+                            setQrKeywords('');
+                            setQrIsActive(true);
+                            setShowQuickReplyModal(true);
+                          }}
+                          className="px-4 py-2.5 bg-white text-emerald-800 hover:bg-emerald-50 font-black text-xs rounded-2xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <span>➕ {isRtl ? 'إضافة رد سريع جديد' : 'Add New Quick Reply'}</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* --- SECTION 1: Agent Quick Replies --- */}
+                    <div className="bg-slate-50 dark:bg-[#10141E] border border-slate-200 dark:border-slate-800 rounded-3xl p-6 space-y-6">
+                      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-4">
+                        <div>
+                          <h4 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
+                            <span>💬 الردود السريعة لموظفي الدعم ({currentQuickReplies.length})</span>
+                          </h4>
+                          <p className="text-xs text-slate-400 font-bold mt-0.5">
+                            {isRtl ? 'الردود الجاهزة التي يستعين بها الموظف بضغطة زر داخل المحادثات' : 'Canned responses for live support agents'}
+                          </p>
+                        </div>
+
+                        {/* Search & Scope Filter */}
+                        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+                          <input
+                            type="text"
+                            value={quickReplySearchTerm}
+                            onChange={(e) => setQuickReplySearchTerm(e.target.value)}
+                            placeholder={isRtl ? '🔍 بحث في الردود...' : '🔍 Search replies...'}
+                            className="px-3 py-2 bg-white dark:bg-[#0A0C10] border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-800 dark:text-white outline-none focus:border-emerald-500 font-sans"
+                          />
+                          <select
+                            value={quickReplyScopeFilter}
+                            onChange={(e: any) => setQuickReplyScopeFilter(e.target.value)}
+                            className="px-3 py-2 bg-white dark:bg-[#0A0C10] border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-800 dark:text-white outline-none focus:border-emerald-500 font-sans cursor-pointer"
+                          >
+                            <option value="all">{isRtl ? 'جميع النطاقات (عام وخاص)' : 'All Scopes'}</option>
+                            <option value="shared">{isRtl ? 'عام لجميع الموظفين' : 'Shared'}</option>
+                            <option value="agent">{isRtl ? 'خاص بي فقط' : 'Private'}</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Category Filter Pills */}
+                      <div className="flex items-center gap-1.5 overflow-x-auto pb-2 scrollbar-none">
+                        {categoriesList.map((cat) => (
+                          <button
+                            key={cat}
+                            type="button"
+                            onClick={() => setQuickReplyCategoryFilter(cat)}
+                            className={`px-3 py-1.5 text-xs font-black rounded-xl transition-all cursor-pointer shrink-0 ${
+                              quickReplyCategoryFilter === cat
+                                ? 'bg-emerald-600 text-white shadow-sm'
+                                : 'bg-white dark:bg-[#0A0C10] text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-800 hover:border-slate-300'
+                            }`}
+                          >
+                            {cat}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Quick Replies Grid */}
+                      {filteredQuickReplies.length === 0 ? (
+                        <div className="py-12 text-center text-slate-400 font-bold text-xs bg-white dark:bg-[#0A0C10] rounded-2xl border border-dashed border-slate-200 dark:border-slate-800">
+                          {isRtl ? 'لا توجد ردود سريعة مطابقة للبحث' : 'No quick replies found'}
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                          {filteredQuickReplies.map((qr: any, idx: number) => (
+                            <div
+                              key={qr.id}
+                              className={`p-4 bg-white dark:bg-[#0A0C10] border rounded-2xl space-y-3 transition-all flex flex-col justify-between ${
+                                qr.isActive
+                                  ? 'border-slate-200 dark:border-slate-800 hover:border-emerald-500/50 shadow-sm'
+                                  : 'border-slate-200/60 dark:border-slate-800/60 opacity-60 bg-slate-100/50 dark:bg-slate-900/30'
+                              }`}
+                            >
+                              <div className="space-y-2">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-xs font-black text-slate-900 dark:text-white truncate">
+                                    {isRtl ? qr.titleAr : (qr.titleEn || qr.titleAr)}
+                                  </span>
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    <span className="text-[9px] px-2 py-0.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-black rounded-md">
+                                      {qr.category}
+                                    </span>
+                                    <span className={`text-[9px] px-2 py-0.5 font-bold rounded-md ${
+                                      qr.scope === 'shared'
+                                        ? 'bg-sky-500/10 text-sky-600 dark:text-sky-400'
+                                        : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                                    }`}>
+                                      {qr.scope === 'shared' ? (isRtl ? 'عام' : 'Shared') : (isRtl ? 'خاص' : 'Private')}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <p className="text-xs text-slate-600 dark:text-slate-300 font-medium leading-relaxed bg-slate-50 dark:bg-slate-900/50 p-3 rounded-xl border border-slate-100 dark:border-slate-800/80 line-clamp-3">
+                                  {isRtl ? qr.textAr : (qr.textEn || qr.textAr)}
+                                </p>
+
+                                {qr.keywords && qr.keywords.length > 0 && (
+                                  <div className="flex flex-wrap gap-1 pt-1">
+                                    {qr.keywords.map((kw: string, kIdx: number) => (
+                                      <span key={kIdx} className="text-[9px] font-mono text-slate-400 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">
+                                        #{kw}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="flex items-center justify-between pt-3 border-t border-slate-100 dark:border-slate-800">
+                                <div className="flex items-center gap-1">
+                                  {/* Toggle Active */}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const updated = currentQuickReplies.map((item: any) =>
+                                        item.id === qr.id ? { ...item, isActive: !item.isActive } : item
+                                      );
+                                      updateQuickRepliesList(updated);
+                                    }}
+                                    className={`px-2.5 py-1 text-[10px] font-black rounded-lg transition-colors cursor-pointer ${
+                                      qr.isActive
+                                        ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20'
+                                        : 'bg-slate-200 dark:bg-slate-800 text-slate-500 hover:bg-slate-300'
+                                    }`}
+                                  >
+                                    {qr.isActive ? (isRtl ? 'مفعل ✓' : 'Active') : (isRtl ? 'معطل ✕' : 'Inactive')}
+                                  </button>
+
+                                  {/* Move Up */}
+                                  <button
+                                    type="button"
+                                    disabled={idx === 0}
+                                    onClick={() => {
+                                      if (idx === 0) return;
+                                      const copy = [...currentQuickReplies];
+                                      const temp = copy[idx];
+                                      copy[idx] = copy[idx - 1];
+                                      copy[idx - 1] = temp;
+                                      updateQuickRepliesList(copy);
+                                    }}
+                                    className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-white disabled:opacity-30 cursor-pointer"
+                                  >
+                                    ⬆️
+                                  </button>
+
+                                  {/* Move Down */}
+                                  <button
+                                    type="button"
+                                    disabled={idx === filteredQuickReplies.length - 1}
+                                    onClick={() => {
+                                      if (idx === filteredQuickReplies.length - 1) return;
+                                      const copy = [...currentQuickReplies];
+                                      const temp = copy[idx];
+                                      copy[idx] = copy[idx + 1];
+                                      copy[idx + 1] = temp;
+                                      updateQuickRepliesList(copy);
+                                    }}
+                                    className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-white disabled:opacity-30 cursor-pointer"
+                                  >
+                                    ⬇️
+                                  </button>
+                                </div>
+
+                                <div className="flex items-center gap-1">
+                                  {/* Edit */}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEditingQuickReply(qr);
+                                      setQrCategory(qr.category || 'عام');
+                                      setQrTitleAr(qr.titleAr || '');
+                                      setQrTitleEn(qr.titleEn || '');
+                                      setQrTextAr(qr.textAr || '');
+                                      setQrTextEn(qr.textEn || '');
+                                      setQrScope(qr.scope || 'shared');
+                                      setQrKeywords(Array.isArray(qr.keywords) ? qr.keywords.join(', ') : '');
+                                      setQrIsActive(qr.isActive ?? true);
+                                      setShowQuickReplyModal(true);
+                                    }}
+                                    className="p-1.5 text-sky-500 hover:bg-sky-500/10 rounded-lg cursor-pointer"
+                                  >
+                                    ✏️
+                                  </button>
+
+                                  {/* Delete */}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (window.confirm(isRtl ? 'هل أنت تأكد من حذف هذا الرد السريع؟' : 'Delete this quick reply?')) {
+                                        const updated = currentQuickReplies.filter((item: any) => item.id !== qr.id);
+                                        updateQuickRepliesList(updated);
+                                      }
+                                    }}
+                                    className="p-1.5 text-rose-500 hover:bg-rose-500/10 rounded-lg cursor-pointer"
+                                  >
+                                    🗑️
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* --- SECTION 2: Customer Quick Suggestions --- */}
+                    <div className="bg-slate-50 dark:bg-[#10141E] border border-slate-200 dark:border-slate-800 rounded-3xl p-6 space-y-6">
+                      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-4">
+                        <div>
+                          <h4 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
+                            <span>💡 الاقتراحات السريعة للعميل ({currentSuggestions.length})</span>
+                          </h4>
+                          <p className="text-xs text-slate-400 font-bold mt-0.5">
+                            {isRtl ? 'تظهر للعميل كأزرار خيارات داخل نافذة المحادثة المباشرة' : 'Displayed to customers as quick suggestion chips inside the chat'}
+                          </p>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingSuggestion(null);
+                            setSugTextAr('');
+                            setSugTextEn('');
+                            setSugIcon('📦');
+                            setSugIsActive(true);
+                            setShowSuggestionModal(true);
+                          }}
+                          className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs rounded-xl shadow-sm transition-all cursor-pointer flex items-center gap-1"
+                        >
+                          ➕ {isRtl ? 'إضافة اقتراح للعميل' : 'Add Suggestion'}
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {currentSuggestions.map((sug: any, sIdx: number) => (
+                          <div
+                            key={sug.id || sIdx}
+                            className={`p-3.5 bg-white dark:bg-[#0A0C10] border rounded-2xl flex items-center justify-between gap-3 transition-all ${
+                              sug.isActive
+                                ? 'border-slate-200 dark:border-slate-800'
+                                : 'border-slate-200/60 dark:border-slate-800/60 opacity-50'
+                            }`}
+                          >
+                            <div className="flex items-center gap-3 min-w-0">
+                              <span className="text-2xl p-2 bg-slate-100 dark:bg-slate-800 rounded-xl shrink-0">{sug.icon || '💬'}</span>
+                              <div className="min-w-0">
+                                <p className="text-xs font-black text-slate-800 dark:text-slate-100 truncate">
+                                  {sug.textAr}
+                                </p>
+                                <p className="text-[10px] text-slate-400 font-semibold truncate">
+                                  {sug.textEn}
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const updated = currentSuggestions.map((item: any) =>
+                                    item.id === sug.id ? { ...item, isActive: !item.isActive } : item
+                                  );
+                                  updateSuggestionsList(updated);
+                                }}
+                                className={`px-2 py-0.5 text-[9px] font-black rounded-lg cursor-pointer ${
+                                  sug.isActive ? 'bg-emerald-500/10 text-emerald-500' : 'bg-slate-200 dark:bg-slate-800 text-slate-400'
+                                }`}
+                              >
+                                {sug.isActive ? '✓' : '✕'}
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingSuggestion(sug);
+                                  setSugTextAr(sug.textAr || '');
+                                  setSugTextEn(sug.textEn || '');
+                                  setSugIcon(sug.icon || '📦');
+                                  setSugIsActive(sug.isActive ?? true);
+                                  setShowSuggestionModal(true);
+                                }}
+                                className="p-1 text-sky-500 hover:bg-sky-500/10 rounded cursor-pointer"
+                              >
+                                ✏️
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (window.confirm(isRtl ? 'حذف هذا الاقتراح؟' : 'Delete suggestion?')) {
+                                    const updated = currentSuggestions.filter((item: any) => item.id !== sug.id);
+                                    updateSuggestionsList(updated);
+                                  }
+                                }}
+                                className="p-1 text-rose-500 hover:bg-rose-500/10 rounded cursor-pointer"
+                              >
+                                🗑️
+                              </button>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   </div>
@@ -8243,6 +8647,99 @@ export default function AdminPanel({
                               {isRtl ? 'الرد على: ' : 'Replying to: '}
                               <strong className="text-emerald-500 block font-mono bg-emerald-500/5 px-2 py-0.5 rounded border border-emerald-500/10 mt-1 truncate">{selectedSessionEmail}</strong>
                             </p>
+
+                            {/* ✨ Smart AI Recommendations Engine */}
+                            {(() => {
+                              const activeQuickReplies = supportSettings?.quickReplies?.filter((qr: any) => qr.isActive) || [];
+                              const lastCustomerMsg = currentChatSessionMessages.slice().reverse().find((m: any) => m.sender === 'user' || m.sender_type === 'customer');
+                              
+                              const getSmartSuggestions = () => {
+                                if (activeQuickReplies.length === 0) return [];
+                                if (!lastCustomerMsg || !lastCustomerMsg.text) {
+                                  return activeQuickReplies.slice(0, 3);
+                                }
+                                const msgText = lastCustomerMsg.text.toLowerCase();
+                                const scored = activeQuickReplies.map((qr: any) => {
+                                  let score = 0;
+                                  if (qr.keywords && Array.isArray(qr.keywords)) {
+                                    qr.keywords.forEach((kw: string) => {
+                                      if (kw && msgText.includes(kw.toLowerCase())) {
+                                        score += 10;
+                                      }
+                                    });
+                                  }
+                                  if (msgText.includes('طلب') && qr.category === 'طلبات') score += 5;
+                                  if ((msgText.includes('شحن') || msgText.includes('تتبع')) && qr.category === 'شحن') score += 5;
+                                  if ((msgText.includes('دفع') || msgText.includes('بطاقة')) && qr.category === 'دفع') score += 5;
+                                  if ((msgText.includes('استرجاع') || msgText.includes('استبدال')) && qr.category === 'استرجاع') score += 5;
+                                  if ((msgText.includes('صورة') || msgText.includes('تالف')) && qr.category === 'تقنية') score += 5;
+                                  return { qr, score };
+                                });
+                                scored.sort((a: any, b: any) => b.score - a.score);
+                                return scored.slice(0, 3).map((s: any) => s.qr);
+                              };
+
+                              const smartSuggestions = getSmartSuggestions();
+
+                              if (smartSuggestions.length === 0) return null;
+
+                              return (
+                                <div className="mt-2.5 p-2 bg-slate-100/80 dark:bg-slate-900/80 border border-slate-200/80 dark:border-slate-800 rounded-2xl space-y-1.5 text-right">
+                                  <div className="flex items-center justify-between text-[10px] font-black text-slate-500 dark:text-slate-400 px-1">
+                                    <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-bold">
+                                      ✨ {isRtl ? 'اقتراحات الرد الذكية:' : 'Smart Suggestions:'}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => setSupportSubTab('quickReplies')}
+                                      className="text-sky-500 hover:underline text-[9px] font-bold cursor-pointer"
+                                    >
+                                      {isRtl ? 'الكل ⚙️' : 'All ⚙️'}
+                                    </button>
+                                  </div>
+                                  <div className="space-y-1.5 max-h-48 overflow-y-auto pr-0.5 scrollbar-thin">
+                                    {smartSuggestions.map((qr: any) => (
+                                      <div
+                                        key={qr.id}
+                                        className="p-2 bg-white dark:bg-[#11141D] border border-slate-200 dark:border-slate-800 hover:border-emerald-500/40 rounded-xl flex flex-col gap-1 transition-all"
+                                      >
+                                        <div className="flex items-center justify-between gap-1">
+                                          <span className="text-[10px] font-black text-slate-800 dark:text-slate-200 truncate">
+                                            {isRtl ? qr.titleAr : (qr.titleEn || qr.titleAr)}
+                                          </span>
+                                          <span className="text-[8.5px] px-1.5 py-0.2 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-black rounded-md shrink-0">
+                                            {qr.category}
+                                          </span>
+                                        </div>
+                                        <p className="text-[9.5px] text-slate-500 dark:text-slate-400 line-clamp-2 leading-tight">
+                                          {isRtl ? qr.textAr : (qr.textEn || qr.textAr)}
+                                        </p>
+                                        <div className="flex items-center gap-1.5 pt-1 border-t border-slate-100 dark:border-slate-800/80">
+                                          <button
+                                            type="button"
+                                            onClick={() => setSupportReply(isRtl ? qr.textAr : (qr.textEn || qr.textAr))}
+                                            className="flex-1 py-1 px-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-[8.5px] rounded-lg transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                                          >
+                                            ✏️ {isRtl ? 'إدراج' : 'Insert'}
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={async () => {
+                                              const textToDirectSend = isRtl ? qr.textAr : (qr.textEn || qr.textAr);
+                                              await sendSupportReply(textToDirectSend);
+                                              triggerToast(isRtl ? '🚀 تم إرسال الرد السريع!' : '🚀 Quick reply sent!');
+                                            }}
+                                            className="flex-1 py-1 px-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[8.5px] rounded-lg transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                                          >
+                                            🚀 {isRtl ? 'إرسال مباشر' : 'Send'}
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              );
+                            })()}
                             
                             <textarea
                               value={supportReply}
@@ -13544,6 +14041,312 @@ export default function AdminPanel({
 
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal for Adding/Editing Quick Replies ── */}
+      {showQuickReplyModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 font-sans text-right">
+          <div className="bg-white dark:bg-[#10141E] border border-slate-200 dark:border-slate-800 rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+              <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                {editingQuickReply ? (isRtl ? '✏️ تعديل رد سريع' : 'Edit Quick Reply') : (isRtl ? '➕ إضافة رد سريع جديد' : 'New Quick Reply')}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowQuickReplyModal(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-white font-bold text-sm cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 mb-1">التصنيف (Category)</label>
+                <select
+                  value={qrCategory}
+                  onChange={(e) => setQrCategory(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 dark:bg-[#0A0C10] border border-slate-200 dark:border-slate-800 rounded-xl text-slate-800 dark:text-white outline-none focus:border-emerald-500"
+                >
+                  <option value="عام">عام (General)</option>
+                  <option value="طلبات">طلبات (Orders)</option>
+                  <option value="شحن">شحن (Shipping)</option>
+                  <option value="دفع">دفع (Payment)</option>
+                  <option value="استرجاع">استرجاع (Returns)</option>
+                  <option value="تقنية">تقنية (Technical)</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10px] font-black text-slate-400 mb-1">العنوان بالعربية</label>
+                  <input
+                    type="text"
+                    value={qrTitleAr}
+                    onChange={(e) => setQrTitleAr(e.target.value)}
+                    placeholder="مثال: 👋 مرحبًا بك"
+                    className="w-full p-2.5 bg-slate-50 dark:bg-[#0A0C10] border border-slate-200 dark:border-slate-800 rounded-xl text-slate-800 dark:text-white outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-black text-slate-400 mb-1">Title (English)</label>
+                  <input
+                    type="text"
+                    value={qrTitleEn}
+                    onChange={(e) => setQrTitleEn(e.target.value)}
+                    placeholder="e.g., 👋 Welcome"
+                    className="w-full p-2.5 bg-slate-50 dark:bg-[#0A0C10] border border-slate-200 dark:border-slate-800 rounded-xl text-slate-800 dark:text-white outline-none focus:border-emerald-500 text-left"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 mb-1">نص الرد الكامل (بالعربية)</label>
+                <textarea
+                  value={qrTextAr}
+                  onChange={(e) => setQrTextAr(e.target.value)}
+                  rows={3}
+                  placeholder="اكتب صيغة الرد التي سيتم إرسالها للعميل..."
+                  className="w-full p-2.5 bg-slate-50 dark:bg-[#0A0C10] border border-slate-200 dark:border-slate-800 rounded-xl text-slate-800 dark:text-white outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 mb-1">Full Reply Text (English)</label>
+                <textarea
+                  value={qrTextEn}
+                  onChange={(e) => setQrTextEn(e.target.value)}
+                  rows={2}
+                  placeholder="Type the response in English..."
+                  className="w-full p-2.5 bg-slate-50 dark:bg-[#0A0C10] border border-slate-200 dark:border-slate-800 rounded-xl text-slate-800 dark:text-white outline-none focus:border-emerald-500 text-left"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 mb-1">الكلمات المفتاحية للاقتراح الذكي (مفصولة بفاصلة)</label>
+                <input
+                  type="text"
+                  value={qrKeywords}
+                  onChange={(e) => setQrKeywords(e.target.value)}
+                  placeholder="مثال: طلب, حالة, شحن, تتبع, دفع, visa"
+                  className="w-full p-2.5 bg-slate-50 dark:bg-[#0A0C10] border border-slate-200 dark:border-slate-800 rounded-xl text-slate-800 dark:text-white outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10px] font-black text-slate-400 mb-1">نطاق الاستخدام (Scope)</label>
+                  <select
+                    value={qrScope}
+                    onChange={(e: any) => setQrScope(e.target.value)}
+                    className="w-full p-2.5 bg-slate-50 dark:bg-[#0A0C10] border border-slate-200 dark:border-slate-800 rounded-xl text-slate-800 dark:text-white outline-none focus:border-emerald-500"
+                  >
+                    <option value="shared">عام لجميع الموظفين (Shared)</option>
+                    <option value="agent">خاص بملفي الشخصي فقط (Private)</option>
+                  </select>
+                </div>
+
+                <div className="flex items-center justify-between pt-4">
+                  <label className="text-xs font-black text-slate-700 dark:text-slate-300">تفعيل الرد السريع</label>
+                  <button
+                    type="button"
+                    onClick={() => setQrIsActive(!qrIsActive)}
+                    className={`px-3 py-1 text-xs font-black rounded-lg cursor-pointer ${
+                      qrIsActive ? 'bg-emerald-600 text-white' : 'bg-slate-300 text-slate-600'
+                    }`}
+                  >
+                    {qrIsActive ? 'مفعل ✓' : 'معطل ✕'}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowQuickReplyModal(false)}
+                className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer"
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!qrTitleAr.trim() || !qrTextAr.trim()) {
+                    triggerToast('يرجى كتابة العنوان والرد بالعربية!');
+                    return;
+                  }
+                  const keywordsArr = qrKeywords
+                    .split(',')
+                    .map((k) => k.trim())
+                    .filter(Boolean);
+
+                  const currentQuickReplies = supportSettings?.quickReplies || [];
+                  let updatedList: any[] = [];
+
+                  if (editingQuickReply) {
+                    updatedList = currentQuickReplies.map((item: any) =>
+                      item.id === editingQuickReply.id
+                        ? {
+                            ...item,
+                            category: qrCategory,
+                            titleAr: qrTitleAr,
+                            titleEn: qrTitleEn || qrTitleAr,
+                            textAr: qrTextAr,
+                            textEn: qrTextEn || qrTextAr,
+                            scope: qrScope,
+                            keywords: keywordsArr,
+                            isActive: qrIsActive
+                          }
+                        : item
+                    );
+                  } else {
+                    const newItem = {
+                      id: `qr-${Date.now()}`,
+                      category: qrCategory,
+                      titleAr: qrTitleAr,
+                      titleEn: qrTitleEn || qrTitleAr,
+                      textAr: qrTextAr,
+                      textEn: qrTextEn || qrTextAr,
+                      scope: qrScope,
+                      keywords: keywordsArr,
+                      isActive: qrIsActive,
+                      orderIndex: currentQuickReplies.length + 1
+                    };
+                    updatedList = [...currentQuickReplies, newItem];
+                  }
+
+                  const newSettings = { ...supportSettings, quickReplies: updatedList };
+                  await handleSaveSupportSettings(newSettings);
+                  setShowQuickReplyModal(false);
+                }}
+                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black rounded-xl cursor-pointer"
+              >
+                {editingQuickReply ? 'حفظ التعديلات 💾' : 'إضافة الرد ➕'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal for Adding/Editing Customer Suggestions ── */}
+      {showSuggestionModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 font-sans text-right">
+          <div className="bg-white dark:bg-[#10141E] border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+              <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                {editingSuggestion ? (isRtl ? '✏️ تعديل اقتراح العميل' : 'Edit Suggestion') : (isRtl ? '➕ إضافة اقتراح للعميل' : 'New Suggestion')}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowSuggestionModal(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-white font-bold text-sm cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 mb-1">الرمز التعبييري (Emoji Icon)</label>
+                <input
+                  type="text"
+                  value={sugIcon}
+                  onChange={(e) => setSugIcon(e.target.value)}
+                  placeholder="📦"
+                  className="w-full p-2.5 bg-slate-50 dark:bg-[#0A0C10] border border-slate-200 dark:border-slate-800 rounded-xl text-slate-800 dark:text-white outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 mb-1">النص بالعربية (ظهر على الزر)</label>
+                <input
+                  type="text"
+                  value={sugTextAr}
+                  onChange={(e) => setSugTextAr(e.target.value)}
+                  placeholder="مثال: 📦 متابعة طلبي"
+                  className="w-full p-2.5 bg-slate-50 dark:bg-[#0A0C10] border border-slate-200 dark:border-slate-800 rounded-xl text-slate-800 dark:text-white outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 mb-1">Text in English</label>
+                <input
+                  type="text"
+                  value={sugTextEn}
+                  onChange={(e) => setSugTextEn(e.target.value)}
+                  placeholder="e.g., 📦 Track my order"
+                  className="w-full p-2.5 bg-slate-50 dark:bg-[#0A0C10] border border-slate-200 dark:border-slate-800 rounded-xl text-slate-800 dark:text-white outline-none focus:border-emerald-500 text-left"
+                />
+              </div>
+
+              <div className="flex items-center justify-between pt-2">
+                <label className="text-xs font-black text-slate-700 dark:text-slate-300">تفعيل الاقتراح</label>
+                <button
+                  type="button"
+                  onClick={() => setSugIsActive(!sugIsActive)}
+                  className={`px-3 py-1 text-xs font-black rounded-lg cursor-pointer ${
+                    sugIsActive ? 'bg-emerald-600 text-white' : 'bg-slate-300 text-slate-600'
+                  }`}
+                >
+                  {sugIsActive ? 'مفعل ✓' : 'معطل ✕'}
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowSuggestionModal(false)}
+                className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer"
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!sugTextAr.trim()) {
+                    triggerToast('يرجى كتابة نص الاقتراح بالعربية!');
+                    return;
+                  }
+                  const currentSuggestions = supportSettings?.suggestions || [];
+                  let updatedList: any[] = [];
+
+                  if (editingSuggestion) {
+                    updatedList = currentSuggestions.map((item: any) =>
+                      item.id === editingSuggestion.id
+                        ? {
+                            ...item,
+                            textAr: sugTextAr,
+                            textEn: sugTextEn || sugTextAr,
+                            icon: sugIcon,
+                            isActive: sugIsActive
+                          }
+                        : item
+                    );
+                  } else {
+                    const newItem = {
+                      id: `s-${Date.now()}`,
+                      textAr: sugTextAr,
+                      textEn: sugTextEn || sugTextAr,
+                      icon: sugIcon,
+                      isActive: sugIsActive,
+                      order: currentSuggestions.length + 1
+                    };
+                    updatedList = [...currentSuggestions, newItem];
+                  }
+
+                  const newSettings = { ...supportSettings, suggestions: updatedList };
+                  await handleSaveSupportSettings(newSettings);
+                  setShowSuggestionModal(false);
+                }}
+                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black rounded-xl cursor-pointer"
+              >
+                {editingSuggestion ? 'حفظ التعديلات 💾' : 'إضافة الاقتراح ➕'}
+              </button>
+            </div>
           </div>
         </div>
       )}

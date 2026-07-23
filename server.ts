@@ -3809,34 +3809,159 @@ const defaultSupportSettings = {
   welcomeMessage: "مرحباً بك في مركز دعم متجر رايفو المالي والتقني الشامل! كيف يمكنني مساعدتك اليوم بخصوص طلباتك أو منتجاتنا الفاخرة؟ 👋",
   isAgentOnline: false,
   suggestions: [
-    { id: "s1", textAr: "📦 أين طلبي؟", textEn: "📦 Where is my order?", icon: "📦", isActive: true, order: 1 },
-    { id: "s2", textAr: "🚚 تتبع الشحنة.", textEn: "🚚 Track shipment.", icon: "🚚", isActive: true, order: 2 },
-    { id: "s3", textAr: "🔄 سياسة الاستبدال والاسترجاع.", textEn: "🔄 Return and exchange policy.", icon: "🔄", isActive: true, order: 3 },
-    { id: "s4", textAr: "🛡️ هل المنتجات أصلية؟", textEn: "🛡️ Are products authentic?", icon: "🛡️", isActive: true, order: 4 },
-    { id: "s5", textAr: "💳 طرق الدفع.", textEn: "💳 Payment methods.", icon: "💳", isActive: true, order: 5 },
-    { id: "s6", textAr: "🎟️ كيف أستخدم كود الخصم؟", textEn: "🎟️ How do I use a discount code?", icon: "🎟️", isActive: true, order: 6 },
-    { id: "s7", textAr: "👨💼 التحدث مع موظف.", textEn: "👨💼 Speak with an agent.", icon: "👨💼", isActive: true, order: 7 }
+    { id: "s1", textAr: "📦 متابعة طلبي", textEn: "📦 Track my order", icon: "📦", isActive: true, order: 1 },
+    { id: "s2", textAr: "🚚 تتبع الشحنة", textEn: "🚚 Shipment tracking", icon: "🚚", isActive: true, order: 2 },
+    { id: "s3", textAr: "💳 لدي مشكلة في الدفع", textEn: "💳 Payment issue", icon: "💳", isActive: true, order: 3 },
+    { id: "s4", textAr: "🔄 أريد استبدال أو إرجاع منتج", textEn: "🔄 Return or exchange item", icon: "🔄", isActive: true, order: 4 },
+    { id: "s5", textAr: "🎟️ لدي مشكلة في كوبون الخصم", textEn: "🎟️ Discount coupon issue", icon: "🎟️", isActive: true, order: 5 },
+    { id: "s6", textAr: "📍 أريد تعديل عنوان الشحن", textEn: "📍 Change shipping address", icon: "📍", isActive: true, order: 6 },
+    { id: "s7", textAr: "🛍️ أحتاج مساعدة في اختيار منتج", textEn: "🛍️ Help selecting a product", icon: "🛍️", isActive: true, order: 7 },
+    { id: "s8", textAr: "⭐ الاستفسار عن الضمان", textEn: "⭐ Warranty inquiry", icon: "⭐", isActive: true, order: 8 },
+    { id: "s9", textAr: "👨‍💼 التحدث مع موظف دعم", textEn: "👨‍💼 Speak with support agent", icon: "👨‍💼", isActive: true, order: 9 },
+    { id: "s10", textAr: "❓ لدي مشكلة أخرى", textEn: "❓ Other issue", icon: "❓", isActive: true, order: 10 }
+  ],
+  quickReplies: [
+    {
+      id: "qr1",
+      category: "عام",
+      titleAr: "👋 مرحبًا بك",
+      titleEn: "👋 Welcome Greeting",
+      textAr: "مرحبًا بك! كيف يمكنني مساعدتك اليوم؟ 👋",
+      textEn: "Welcome! How can I help you today? 👋",
+      isActive: true,
+      scope: "shared",
+      keywords: ["مرحبا", "سلام", "اهلا", "مرحبتين", "hello", "hi", "hey"],
+      orderIndex: 1
+    },
+    {
+      id: "qr2",
+      category: "طلبات",
+      titleAr: "📦 فحص حالة الطلب",
+      titleEn: "📦 Order Status Check",
+      textAr: "تم استلام طلبك، سأراجع حالته الآن في النظام وأفيدك فوراً. 📦",
+      textEn: "Your order details have been received, I am checking its status now. 📦",
+      isActive: true,
+      scope: "shared",
+      keywords: ["طلب", "طلبي", "طلبك", "أين", "وين", "حالة", "order", "status"],
+      orderIndex: 2
+    },
+    {
+      id: "qr3",
+      category: "شحن",
+      titleAr: "🚚 رقم التتبع والشحن",
+      titleEn: "🚚 Shipping Tracking Info",
+      textAr: "تم شحن طلبك بنجاح، وهذا رقم التتبع الخاص بك لتتبع الشحنة: [رقم التتبع] 🚚",
+      textEn: "Your order has been shipped! Here is your tracking number: [TRACKING_NUMBER] 🚚",
+      isActive: true,
+      scope: "shared",
+      keywords: ["شحن", "تتبع", "شحنة", "توصيل", "ارامكس", "سمسا", "track", "shipping"],
+      orderIndex: 3
+    },
+    {
+      id: "qr4",
+      category: "دفع",
+      titleAr: "💳 توضيح مشكلة الدفع",
+      titleEn: "💳 Payment Inquiry",
+      textAr: "يرجى توضيح مشكلة الدفع التي تواجهك مع إرفاق صورة من إيصال التحويل أو الخطأ إن أمكن. 💳",
+      textEn: "Please clarify the payment issue and attach a photo/receipt if possible. 💳",
+      isActive: true,
+      scope: "shared",
+      keywords: ["دفع", "فيزا", "مدى", "بطاقة", "تحويل", "خصم", "pay", "payment"],
+      orderIndex: 4
+    },
+    {
+      id: "qr5",
+      category: "تقنية",
+      titleAr: "📷 طلب صورة للمشكلة",
+      titleEn: "📷 Request Issue Photo",
+      textAr: "يرجى إرسال صورة واضحة للمشكلة أو المنتج حتى نتمكن من مساعدتك فوراً. 📷",
+      textEn: "Please send a clear photo of the issue so we can assist you right away. 📷",
+      isActive: true,
+      scope: "shared",
+      keywords: ["صورة", "تالف", "مكسور", "عطل", "مشكلة", "خراب", "broken", "damaged", "photo"],
+      orderIndex: 5
+    },
+    {
+      id: "qr6",
+      category: "عام",
+      titleAr: "⏳ الانتظار والمراجعة",
+      titleEn: "⏳ Please Wait",
+      textAr: "يرجى الانتظار قليلًا أثناء مراجعة بيانات طلبك في النظام. ⏳",
+      textEn: "Please wait a moment while I review your order details. ⏳",
+      isActive: true,
+      scope: "shared",
+      keywords: ["انتظار", "لحظة", "دقيقة", "صبر", "مراجعة", "wait", "hold"],
+      orderIndex: 6
+    },
+    {
+      id: "qr7",
+      category: "استرجاع",
+      titleAr: "🔄 حل المشكلة والاسترجاع",
+      titleEn: "🔄 Exchange or Refund",
+      textAr: "سنساعدك في إجراءات الاستبدال أو الاسترجاع بكل سهولة وفق سياستنا المعتمدة. 🔄",
+      textEn: "We will easily assist you with exchange or return procedures according to our policy. 🔄",
+      isActive: true,
+      scope: "shared",
+      keywords: ["استرجاع", "استبدال", "ترجيع", "إرجاع", "تبديل", "policy", "return", "refund"],
+      orderIndex: 7
+    },
+    {
+      id: "qr8",
+      category: "عام",
+      titleAr: "✅ تم حل المشكلة",
+      titleEn: "✅ Issue Resolved",
+      textAr: "تم حل المشكلة بنجاح، هل يوجد أي شيء آخر يمكنني مساعدتك به اليوم؟ ✅",
+      textEn: "The issue has been resolved. Is there anything else I can help you with today? ✅",
+      isActive: true,
+      scope: "shared",
+      keywords: ["تم", "انتهى", "حل", "جاهز", "solved", "fixed"],
+      orderIndex: 8
+    },
+    {
+      id: "qr9",
+      category: "عام",
+      titleAr: "🙏 شكر وختام",
+      titleEn: "🙏 Thank You & Goodbye",
+      textAr: "شكرًا لتواصلك معنا في متجر رايفو! نتمنى لك يومًا سعيدًا. 🙏✨",
+      textEn: "Thank you for contacting RYVO Store! Have a wonderful day. 🙏✨",
+      isActive: true,
+      scope: "shared",
+      keywords: ["شكرا", "تسلم", "يوم سعيد", "thanks", "bye"],
+      orderIndex: 9
+    }
   ]
 };
 
 // Helper to get support settings
 async function getSupportSettings() {
+  let settings: any = null;
   if (db) {
     try {
       const snap = await db.collection("settings").doc("support_chat").get();
       if (snap.exists() && snap.data()) {
-        return snap.data();
+        settings = snap.data();
       }
     } catch (e) {
       console.error("Error reading support settings from Firestore:", e);
     }
   }
-  if (fs.existsSync(SUPPORT_SETTINGS_FILE)) {
+  if (!settings && fs.existsSync(SUPPORT_SETTINGS_FILE)) {
     try {
-      return JSON.parse(fs.readFileSync(SUPPORT_SETTINGS_FILE, "utf8"));
+      settings = JSON.parse(fs.readFileSync(SUPPORT_SETTINGS_FILE, "utf8"));
     } catch (e) {}
   }
-  return defaultSupportSettings;
+  if (!settings) {
+    settings = { ...defaultSupportSettings };
+  } else {
+    // Ensure suggestions and quickReplies exist
+    if (!settings.suggestions || !Array.isArray(settings.suggestions) || settings.suggestions.length === 0) {
+      settings.suggestions = defaultSupportSettings.suggestions;
+    }
+    if (!settings.quickReplies || !Array.isArray(settings.quickReplies) || settings.quickReplies.length === 0) {
+      settings.quickReplies = defaultSupportSettings.quickReplies;
+    }
+  }
+  return settings;
 }
 
 // Helper to save support settings
@@ -3950,18 +4075,24 @@ app.post("/api/support/conversations/:id/message", async (req, res) => {
     const content = attachment ? attachment.url : message;
 
     if (sender === 'user') {
-      console.log(`[STEP 1] Message received: "${message}" from session ${decodedId}`);
+      console.log(`[STEP 1] Message received: "${message || ''}" from session ${decodedId}`);
+      console.log(`Before sanitize:\nconversation.status = "${conversation.status}"`);
 
-      if (conversation.status === 'CLOSED') {
-        await dbSupportService.updateConversationStatus(conversation.id, 'AI_HANDLING');
-        conversation.status = 'AI_HANDLING';
+      // If conversation is in legacy or queued state (and not HUMAN_HANDLING), auto-reset to AI_HANDLING when user sends a message
+      if (conversation.status !== 'HUMAN_HANDLING' && conversation.status !== 'PENDING_CUSTOMER_APPROVAL') {
+        if (conversation.status !== 'AI_HANDLING') {
+          await dbSupportService.updateConversationStatus(conversation.id, 'AI_HANDLING');
+          conversation.status = 'AI_HANDLING';
+        }
       }
+
+      console.log(`After sanitize:\nconversation.status = "${conversation.status}"`);
+      console.log(`[STEP 2] Check conversation status: "${conversation.status}"`);
 
       if (conversation.status === 'AI_HANDLING' || conversation.status === 'PENDING_CUSTOMER_APPROVAL') {
         const savedUserMsg = await dbSupportService.addMessage(conversation.id, 'customer', msgType, content, false);
         if (savedUserMsg && io) {
           io.to(`conversation_${decodedId}`).emit('message_received', savedUserMsg);
-          // GATED: DO NOT emit user message to agents_room while AI_HANDLING
         }
 
         conversation.messages.push({
@@ -3971,8 +4102,14 @@ app.post("/api/support/conversations/:id/message", async (req, res) => {
           attachment: attachment
         });
 
+        console.log(`[STEP 3] Check if user requested human support`);
+        console.log(`[STEP 4] Call Gemini`);
+
         // Trigger AI
         const aiReply = await generateAIResponse(conversation, message || '', attachment);
+        
+        console.log(`[STEP 5] Gemini response received`);
+
         let cleanAiReply = aiReply;
         let shouldTransfer = false;
 
@@ -3983,13 +4120,13 @@ app.post("/api/support/conversations/:id/message", async (req, res) => {
 
         const savedAiMsg = await dbSupportService.addMessage(conversation.id, 'ai', 'text', cleanAiReply, false);
         if (savedAiMsg && io) {
-          console.log(`[STEP 4] Sending response to client`);
+          console.log(`[STEP 6] Send AI response`);
           io.to(`conversation_${decodedId}`).emit('message_received', savedAiMsg);
-          // GATED: DO NOT emit AI message to agents_room while AI_HANDLING
         }
 
         if (shouldTransfer) {
-          const reason = conversation.transfer_reason || "طلب تحويل إلى موظف دعم بشري";
+          const reason = conversation.transfer_reason || "استدعت حالة المحادثة تحويلاً للدعم البشري";
+          console.log("Escalating to human support. Reason:", reason);
           console.log("[STEP X] Escalating to human support. Reason:", reason);
 
           await dbSupportService.updateConversationStatus(conversation.id, 'PENDING_CUSTOMER_APPROVAL');
@@ -4002,7 +4139,6 @@ app.post("/api/support/conversations/:id/message", async (req, res) => {
           await dbSupportService.updateConversationSummary(conversation.id, summary);
 
           if (io) {
-            // Customer room only receives approval state
             io.to(`conversation_${decodedId}`).emit('status_updated', { status: 'PENDING_CUSTOMER_APPROVAL', ai_summary: summary });
           }
         } else {
@@ -4014,7 +4150,7 @@ app.post("/api/support/conversations/:id/message", async (req, res) => {
           }
         }
 
-        console.log(`[STEP 5] Return completed`);
+        console.log(`[STEP 7] Return`);
         return res.json({ success: true, conversation, aiReplied: true, aiResponseText: cleanAiReply });
       } else {
         const savedUserMsg = await dbSupportService.addMessage(conversation.id, 'customer', msgType, content, false);

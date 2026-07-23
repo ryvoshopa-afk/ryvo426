@@ -45,6 +45,16 @@ function mapMessage(msg: any) {
   };
 }
 
+// Helper to normalize and sanitize conversation status
+const LEGACY_INVALID_STATUSES = ['waiting_for_human', 'queued', 'pending', 'human_support', 'escalated', 'waiting', 'active_ai', 'ai', 'queued_for_human'];
+
+function sanitizeStatus(status: string): string {
+  if (!status || LEGACY_INVALID_STATUSES.includes(status.toLowerCase())) {
+    return 'AI_HANDLING';
+  }
+  return status;
+}
+
 // Get active conversation for a user session
 export async function getOrCreateConversation(sessionId: string, clientMetadata: any = {}) {
   const sessionKey = sessionId.toLowerCase().trim();
@@ -54,6 +64,12 @@ export async function getOrCreateConversation(sessionId: string, clientMetadata:
     // Fallback mode
     const localData = loadLocalConversations();
     if (localData[sessionKey]) {
+      const sanitized = sanitizeStatus(localData[sessionKey].status);
+      if (sanitized !== localData[sessionKey].status) {
+        console.log(`🧹 [LOCAL_CLEANUP] Cleaned legacy status "${localData[sessionKey].status}" -> "AI_HANDLING" for ${sessionKey}`);
+        localData[sessionKey].status = 'AI_HANDLING';
+        saveLocalConversation(sessionKey, localData[sessionKey]);
+      }
       return localData[sessionKey];
     }
     // Create new local conversation
@@ -87,6 +103,12 @@ export async function getOrCreateConversation(sessionId: string, clientMetadata:
     let dbConv;
     if (selectRes.rows.length > 0) {
       dbConv = selectRes.rows[0];
+      const sanitized = sanitizeStatus(dbConv.status);
+      if (sanitized !== dbConv.status) {
+        console.log(`🧹 [DB_CLEANUP] Cleaned legacy status "${dbConv.status}" -> "AI_HANDLING" for conversation ${dbConv.id}`);
+        await query(`UPDATE conversations SET status = 'AI_HANDLING', updated_at = NOW() WHERE id = $1`, [dbConv.id]);
+        dbConv.status = 'AI_HANDLING';
+      }
     } else {
       // Create new conversation
       const insertRes = await query(
@@ -119,7 +141,7 @@ export async function getOrCreateConversation(sessionId: string, clientMetadata:
       ip: dbConv.metadata.ip || '127.0.0.1',
       createdAt: dbConv.created_at,
       lastActive: new Date(dbConv.updated_at).getTime(),
-      status: dbConv.status,
+      status: sanitizeStatus(dbConv.status),
       ai_summary: dbConv.ai_summary,
       messages: messages
     };
@@ -141,7 +163,11 @@ export async function getConversationById(id: string) {
   const dbStatus = getDbStatus();
   if (!dbStatus.connected) {
     const localData = loadLocalConversations();
-    return localData[id.toLowerCase().trim()] || null;
+    const conv = localData[id.toLowerCase().trim()] || null;
+    if (conv) {
+      conv.status = sanitizeStatus(conv.status);
+    }
+    return conv;
   }
 
   try {
@@ -160,6 +186,13 @@ export async function getConversationById(id: string) {
     }
 
     const dbConv = selectRes.rows[0];
+    const sanitized = sanitizeStatus(dbConv.status);
+    if (sanitized !== dbConv.status) {
+      console.log(`🧹 [DB_CLEANUP] Cleaned legacy status "${dbConv.status}" -> "AI_HANDLING" for conversation ${dbConv.id}`);
+      await query(`UPDATE conversations SET status = 'AI_HANDLING', updated_at = NOW() WHERE id = $1`, [dbConv.id]);
+      dbConv.status = 'AI_HANDLING';
+    }
+
     const msgRes = await query(`SELECT * FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC`, [dbConv.id]);
     const messages = msgRes.rows.map(mapMessage);
 
@@ -176,7 +209,7 @@ export async function getConversationById(id: string) {
       ip: dbConv.metadata?.ip || '127.0.0.1',
       createdAt: dbConv.created_at,
       lastActive: new Date(dbConv.updated_at).getTime(),
-      status: dbConv.status,
+      status: sanitized,
       ai_summary: dbConv.ai_summary || '',
       transfer_reason: dbConv.transfer_reason || dbConv.metadata?.transfer_reason || '',
       messages: messages
@@ -243,12 +276,13 @@ export async function getConversationsForAgent() {
 
 // Update conversation status
 export async function updateConversationStatus(id: string, status: string) {
+  const cleanStatus = sanitizeStatus(status);
   const dbStatus = getDbStatus();
   if (!dbStatus.connected) {
     const localData = loadLocalConversations();
     const sessionKey = id.toLowerCase().trim();
     if (localData[sessionKey]) {
-      localData[sessionKey].status = status;
+      localData[sessionKey].status = cleanStatus;
       localData[sessionKey].lastActive = Date.now();
       saveLocalConversation(sessionKey, localData[sessionKey]);
       return localData[sessionKey];
@@ -261,14 +295,14 @@ export async function updateConversationStatus(id: string, status: string) {
     if (isUuid(id)) {
       res = await query(
         `UPDATE conversations SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *`,
-        [status, id]
+        [cleanStatus, id]
       );
     }
     if (res.rows.length === 0) {
       // Check if ID is user_id session key
       const resUser = await query(
         `UPDATE conversations SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND status != 'CLOSED' RETURNING *`,
-        [status, id.toLowerCase().trim()]
+        [cleanStatus, id.toLowerCase().trim()]
       );
       return resUser.rows[0] || null;
     }

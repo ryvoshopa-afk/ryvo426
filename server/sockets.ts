@@ -96,20 +96,25 @@ export function initSockets(io: Server) {
 
       // 2. AI Gateway Guard checking
       if (sender === 'user') {
-        console.log(`[STEP 1] Message received: "${text}" from session ${cleanSessionId}`);
+        console.log(`[STEP 1] Message received: "${text || ''}" from session ${cleanSessionId}`);
+        console.log(`Before sanitize:\nconversation.status = "${conversation.status}"`);
 
-        // Re-open closed conversation if user sends a message
-        if (conversation.status === 'CLOSED') {
-          await updateConversationStatus(conversation.id, 'AI_HANDLING');
-          conversation.status = 'AI_HANDLING';
+        // If conversation is in legacy or queued state (and not HUMAN_HANDLING), auto-reset to AI_HANDLING when user sends a message
+        if (conversation.status !== 'HUMAN_HANDLING' && conversation.status !== 'PENDING_CUSTOMER_APPROVAL') {
+          if (conversation.status !== 'AI_HANDLING') {
+            await updateConversationStatus(conversation.id, 'AI_HANDLING');
+            conversation.status = 'AI_HANDLING';
+          }
         }
+
+        console.log(`After sanitize:\nconversation.status = "${conversation.status}"`);
+        console.log(`[STEP 2] Check conversation status: "${conversation.status}"`);
 
         if (conversation.status === 'AI_HANDLING' || conversation.status === 'PENDING_CUSTOMER_APPROVAL') {
           // Save and broadcast customer message to client only
           const savedUserMsg = await addMessage(conversation.id, 'customer', msgType, content, false);
           if (savedUserMsg) {
             io.to(clientRoom).emit('message_received', savedUserMsg);
-            // DO NOT notify agents_room during AI_HANDLING
           }
 
           // Update conversation object with the new user message locally so Gemini has it in context
@@ -123,8 +128,13 @@ export function initSockets(io: Server) {
           // Show typing indicator for AI
           io.to(clientRoom).emit('typing_status', { sender: 'support', isTyping: true });
 
+          console.log(`[STEP 3] Check if user requested human support`);
+          console.log(`[STEP 4] Call Gemini`);
+
           const aiReply = await generateAIResponse(conversation, text || '', attachment);
           
+          console.log(`[STEP 5] Gemini response received`);
+
           // Stop typing indicator
           io.to(clientRoom).emit('typing_status', { sender: 'support', isTyping: false });
 
@@ -139,13 +149,13 @@ export function initSockets(io: Server) {
           // Save AI message to DB
           const savedAiMsg = await addMessage(conversation.id, 'ai', 'text', cleanAiReply, false);
           if (savedAiMsg) {
-            console.log(`[STEP 4] Sending response to client`);
+            console.log(`[STEP 6] Send AI response`);
             io.to(clientRoom).emit('message_received', savedAiMsg);
-            // DO NOT notify agents_room during AI_HANDLING
           }
 
           if (shouldTransfer) {
-            const reason = conversation.transfer_reason || "طلب تحويل إلى موظف دعم بشري";
+            const reason = conversation.transfer_reason || "استدعت حالة المحادثة تحويلاً للدعم البشري";
+            console.log("Escalating to human support. Reason:", reason);
             console.log("[STEP X] Escalating to human support. Reason:", reason);
 
             // Transition to PENDING_CUSTOMER_APPROVAL
@@ -162,7 +172,7 @@ export function initSockets(io: Server) {
             const summary = await generateSmartSummary(conversation, reason);
             await updateConversationSummary(conversation.id, summary);
 
-            // Emit status update to customer room only (agents should not see intermediate approval stage)
+            // Emit status update to customer room only
             io.to(clientRoom).emit('status_updated', { status: 'PENDING_CUSTOMER_APPROVAL', ai_summary: summary });
           } else {
             if (conversation.status !== 'AI_HANDLING') {
@@ -170,7 +180,7 @@ export function initSockets(io: Server) {
               io.to(clientRoom).emit('status_updated', { status: 'AI_HANDLING' });
             }
           }
-          console.log(`[STEP 5] Return completed`);
+          console.log(`[STEP 7] Return`);
 
         } else {
           // Conversation is handled by a human or queued for human

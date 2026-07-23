@@ -296,6 +296,12 @@ export default function SupportChat({ currentLanguage, currentUser, onClose }: S
   const handleDeclineTransfer = async () => {
     try {
       socket.emit('decline_transfer', { sessionId: conversationId });
+      smartFetch(`/api/support/conversations/${encodeURIComponent(conversationId)}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'AI_HANDLING' })
+      }).catch(() => {});
+
       setConvStatus('AI_HANDLING');
       const sysMsg: ChatMessage = {
         id: `sys-decline-${Date.now()}`,
@@ -493,12 +499,16 @@ export default function SupportChat({ currentLanguage, currentUser, onClose }: S
 
   // ─── Suggestions ────────────────────────────────────────────────────────────
   const defaultSuggestions = [
-    { id: 's1', textAr: '📦 أين طلبي؟', textEn: '📦 Where is my order?', icon: '📦', isActive: true },
-    { id: 's2', textAr: '🚚 تتبع الشحنة', textEn: '🚚 Track shipment', icon: '🚚', isActive: true },
-    { id: 's3', textAr: '💳 وسائل الدفع', textEn: '💳 Payment methods', icon: '💳', isActive: true },
-    { id: 's4', textAr: '🔄 سياسة الاسترجاع', textEn: '🔄 Return policy', icon: '🔄', isActive: true },
-    { id: 's5', textAr: '🎁 الكوبونات ونقاط الولاء', textEn: '🎁 Coupons & loyalty points', icon: '🎁', isActive: true },
-    { id: 's6', textAr: '👨‍💼 التحدث مع موظف', textEn: '👨‍💼 Speak with an agent', icon: '👨‍💼', isActive: true },
+    { id: 's1', textAr: '📦 متابعة طلبي', textEn: '📦 Track my order', icon: '📦', isActive: true },
+    { id: 's2', textAr: '🚚 تتبع الشحنة', textEn: '🚚 Shipment tracking', icon: '🚚', isActive: true },
+    { id: 's3', textAr: '💳 لدي مشكلة في الدفع', textEn: '💳 Payment issue', icon: '💳', isActive: true },
+    { id: 's4', textAr: '🔄 أريد استبدال أو إرجاع منتج', textEn: '🔄 Return or exchange item', icon: '🔄', isActive: true },
+    { id: 's5', textAr: '🎟️ لدي مشكلة في كوبون الخصم', textEn: '🎟️ Discount coupon issue', icon: '🎟️', isActive: true },
+    { id: 's6', textAr: '📍 أريد تعديل عنوان الشحن', textEn: '📍 Change shipping address', icon: '📍', isActive: true },
+    { id: 's7', textAr: '🛍️ أحتاج مساعدة في اختيار منتج', textEn: '🛍️ Help selecting a product', icon: '🛍️', isActive: true },
+    { id: 's8', textAr: '⭐ الاستفسار عن الضمان', textEn: '⭐ Warranty inquiry', icon: '⭐', isActive: true },
+    { id: 's9', textAr: '👨‍💼 التحدث مع موظف دعم', textEn: '👨‍💼 Speak with support agent', icon: '👨‍💼', isActive: true },
+    { id: 's10', textAr: '❓ لدي مشكلة أخرى', textEn: '❓ Other issue', icon: '❓', isActive: true },
   ];
   const activeSuggestions = (settings.suggestions?.filter(s => s.isActive) ?? []).length > 0
     ? settings.suggestions!.filter(s => s.isActive)
@@ -760,13 +770,13 @@ export default function SupportChat({ currentLanguage, currentUser, onClose }: S
 
         {/* ── Quick Suggestions row (inline) ───────────────────────────────── */}
         {messages.length > 0 && (convStatus === 'AI_HANDLING' || convStatus === 'active') && (
-          <div className="bg-white dark:bg-[#0D1017] border-t border-slate-100 dark:border-slate-800 px-3 py-2 flex-shrink-0">
-            <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-0.5">
-              {activeSuggestions.slice(0, 4).map(s => (
+          <div className="bg-white/80 dark:bg-[#0D1017]/80 backdrop-blur-md border-t border-slate-100 dark:border-slate-800 px-3 py-2 flex-shrink-0">
+            <div className="flex gap-2 overflow-x-auto scrollbar-none pb-0.5 scroll-smooth">
+              {activeSuggestions.map(s => (
                 <button key={s.id} type="button"
                   disabled={isSending}
                   onClick={() => sendMessage(isRtl ? s.textAr : s.textEn)}
-                  className="whitespace-nowrap px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-sky-500/10 hover:border-sky-400 border border-transparent text-slate-600 dark:text-slate-400 text-[11px] font-bold rounded-xl transition-all cursor-pointer flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed">
+                  className="whitespace-nowrap px-3 py-1.5 bg-slate-100 dark:bg-slate-800/80 hover:bg-sky-500/10 dark:hover:bg-sky-500/20 hover:border-sky-400/50 border border-slate-200/50 dark:border-slate-700/50 text-slate-700 dark:text-slate-300 text-[11px] font-bold rounded-xl transition-all cursor-pointer flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed shadow-2xs hover:scale-[1.02] active:scale-[0.98]">
                   {isRtl ? s.textAr : s.textEn}
                 </button>
               ))}

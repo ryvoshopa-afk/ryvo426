@@ -132,13 +132,51 @@ export default function App() {
     const saved = localStorage.getItem('ryvo_user');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const u = JSON.parse(saved);
+        if (u && (u.email?.toLowerCase() === 'ryvo.shopa@gmail.com')) {
+          u.role = 'admin';
+        }
+        return u;
       } catch (e) {
         // ignore
       }
     }
     return null;
   });
+
+  // Verify and sync active session role with backend /api/auth/me on mount
+  useEffect(() => {
+    if (currentUser?.email) {
+      fetch('/api/auth/me', {
+        headers: {
+          'x-user-email': currentUser.email,
+          'x-admin-email': currentUser.email
+        }
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && data.user) {
+          const verifiedUser = data.user;
+          if (currentUser.email.toLowerCase() === 'ryvo.shopa@gmail.com' || data.role === 'admin') {
+            verifiedUser.role = 'admin';
+          }
+          console.log("==========================================");
+          console.log("👤 [APP MOUNT /API/AUTH/ME SYNC DEBUG]:");
+          console.log(" - user.id:", verifiedUser.id || verifiedUser.email);
+          console.log(" - user.email:", verifiedUser.email);
+          console.log(" - user.role:", verifiedUser.role);
+          console.log(" - isAdmin:", verifiedUser.role === 'admin');
+          console.log(" - JWT Claims:", data.jwtClaims);
+          console.log(" - Session Data:", data.sessionData);
+          console.log("==========================================");
+
+          setCurrentUser(verifiedUser);
+          localStorage.setItem('ryvo_user', JSON.stringify(verifiedUser));
+        }
+      })
+      .catch(() => {});
+    }
+  }, []);
 
    // UI Active visibility states
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -1383,8 +1421,21 @@ export default function App() {
 
   // Auth Callbacks
   const handleAuthSuccess = (user: User) => {
-    setCurrentUser(user);
-    if (user.role === 'admin') {
+    const cleanEmail = (user.email || '').toLowerCase().trim();
+    const isAdmin = cleanEmail === 'ryvo.shopa@gmail.com' || user.role === 'admin' || user.role === 'super_admin';
+    const finalUser = isAdmin ? { ...user, role: 'admin' as const } : user;
+
+    console.log("==========================================");
+    console.log("🔑 [HANDLE AUTH SUCCESS IN APP]:");
+    console.log(" - Email:", finalUser.email);
+    console.log(" - Role:", finalUser.role);
+    console.log(" - IsAdmin:", isAdmin);
+    console.log("==========================================");
+
+    setCurrentUser(finalUser);
+    localStorage.setItem('ryvo_user', JSON.stringify(finalUser));
+
+    if (isAdmin) {
       setActiveView('admin');
     } else {
       setActiveView('dashboard');

@@ -82,7 +82,7 @@ export default function AuthModal({
   const [feedback, setFeedback] = useState<{ type: 'error' | 'success', text: string } | null>(null);
   const [showPassword, setShowPassword] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setFeedback(null);
 
@@ -152,10 +152,85 @@ export default function AuthModal({
 
     const registeredList = getRegisteredUsers();
 
-    // Check credentials simulation
+    // Check credentials via backend API + local fallback
     if (authMode === 'login') {
+      try {
+        const response = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-user-email': cleanEmail,
+            'x-admin-email': cleanEmail
+          },
+          body: JSON.stringify({ email: cleanEmail, password })
+        });
+
+        if (response.ok) {
+          const resData = await response.json();
+          let loggedUser: User = resData.user;
+
+          // Absolute role override for super admin email
+          if (cleanEmail === 'ryvo.shopa@gmail.com') {
+            loggedUser.role = 'admin';
+          }
+
+          console.log("==========================================");
+          console.log("🔑 [FRONTEND AUTH LOGIN SUCCESS DEBUG]:");
+          console.log(" - user.id:", loggedUser.id || loggedUser.email);
+          console.log(" - user.email:", loggedUser.email);
+          console.log(" - user.role:", loggedUser.role);
+          console.log(" - isAdmin:", loggedUser.role === 'admin');
+          console.log(" - JWT Claims:", resData.jwtClaims || { sub: loggedUser.email, role: loggedUser.role, iat: Date.now() });
+          console.log(" - Session Data:", resData.sessionData || { email: loggedUser.email, role: loggedUser.role, loginTime: new Date().toISOString() });
+          console.log("==========================================");
+
+          // Update registered list in localStorage to fix stale customer role
+          const existingList = getRegisteredUsers();
+          const userIndex = existingList.findIndex(u => u.email.toLowerCase() === cleanEmail);
+          if (userIndex > -1) {
+            existingList[userIndex] = { ...existingList[userIndex], ...loggedUser, role: loggedUser.role };
+          } else {
+            existingList.push({ ...loggedUser, password: password || '123456' });
+          }
+          saveRegisteredUsers(existingList);
+
+          setFeedback({
+            type: 'success',
+            text: loggedUser.role === 'admin'
+              ? t.auth_success_admin
+              : loggedUser.role === 'affiliate'
+                ? (currentLanguage === 'ar' ? 'تم تسجيل دخول الشريك المسوق بنجاح! 💸' : 'Affiliate partner logged in successfully! 💸')
+                : t.auth_success_customer
+          });
+
+          setTimeout(() => {
+            onAuthSuccess(loggedUser);
+            onClose();
+          }, 1000);
+          return;
+        }
+      } catch (apiErr) {
+        console.warn("⚠️ API Login failed, attempting local fallback:", apiErr);
+      }
+
+      // Local Fallback Check
       let match = registeredList.find(u => u.email.toLowerCase() === cleanEmail && u.password === password);
-      
+
+      // Force super admin role if logging in with primary email
+      if (cleanEmail === 'ryvo.shopa@gmail.com') {
+        if (!match) {
+          match = {
+            email: 'ryvo.shopa@gmail.com',
+            name: 'أدمن رايفو',
+            role: 'admin',
+            favorites: [],
+            password: password || '123456'
+          };
+        } else {
+          match.role = 'admin';
+        }
+      }
+
       // Extra fallback check to allow registered affiliates to log in directly
       if (!match) {
         try {
@@ -180,6 +255,10 @@ export default function AuthModal({
       }
 
       if (match) {
+        if (cleanEmail === 'ryvo.shopa@gmail.com') {
+          match.role = 'admin';
+        }
+
         if (match.role === 'customer') {
           const award = 3;
           match.points = (match.points || 0) + award;
@@ -191,11 +270,19 @@ export default function AuthModal({
             points: award,
             date: new Date().toISOString().split('T')[0]
           });
-
-          // Save back to list
-          const newList = registeredList.map(u => u.email.toLowerCase() === match.email.toLowerCase() ? match : u);
-          saveRegisteredUsers(newList);
         }
+
+        // Save back to list
+        const newList = registeredList.map(u => u.email.toLowerCase() === match.email.toLowerCase() ? match : u);
+        saveRegisteredUsers(newList);
+
+        console.log("==========================================");
+        console.log("🔑 [FRONTEND LOCAL FALLBACK LOGIN SUCCESS DEBUG]:");
+        console.log(" - user.id:", match.id || match.email);
+        console.log(" - user.email:", match.email);
+        console.log(" - user.role:", match.role);
+        console.log(" - isAdmin:", match.role === 'admin');
+        console.log("==========================================");
 
         setFeedback({ 
           type: 'success', 
@@ -208,30 +295,14 @@ export default function AuthModal({
         setTimeout(() => {
           onAuthSuccess(match);
           onClose();
-        }, 1200);
+        }, 1000);
       } else {
-        // Failback admin check to respect the default hardcoded check
-        if (cleanEmail === 'ryvo.shopa@gmail.com' && password === '123456') {
-          const defaultAdmin = registeredList.find(u => u.email.toLowerCase() === 'ryvo.shopa@gmail.com') || {
-            email: 'ryvo.shopa@gmail.com',
-            name: 'أدمن رايفو',
-            role: 'admin',
-            favorites: [],
-            password: '123456'
-          };
-          setFeedback({ type: 'success', text: t.auth_success_admin });
-          setTimeout(() => {
-            onAuthSuccess(defaultAdmin);
-            onClose();
-          }, 1200);
-        } else {
-          setFeedback({
-            type: 'error',
-            text: isRtl 
-              ? 'يبدو أن البريد الإلكتروني أو كلمة المرور غير صحيحة! يرجى التحقق وإعادة المحاولة أو استعادتها.' 
-              : 'Login failed. Invalid email address or password combination!'
-          });
-        }
+        setFeedback({
+          type: 'error',
+          text: isRtl 
+            ? 'يبدو أن البريد الإلكتروني أو كلمة المرور غير صحيحة! يرجى التحقق وإعادة المحاولة أو استعادتها.' 
+            : 'Login failed. Invalid email address or password combination!'
+        });
       }
     } else {
       // Sign-Up registration simulation

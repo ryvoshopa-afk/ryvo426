@@ -150,6 +150,7 @@ export interface Order {
 }
 
 export interface User {
+  id?: string;
   email: string;
   name: string;
   role: 'customer' | 'admin' | 'affiliate' | 'super_admin' | 'manager' | 'support' | 'warehouse' | 'marketing' | 'finance';

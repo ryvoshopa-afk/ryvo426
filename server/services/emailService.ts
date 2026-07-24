@@ -50,9 +50,10 @@ export async function sendRealEmail(options: EmailDispatchOptions): Promise<{ su
   const settings = options.getSettings ? options.getSettings() : {};
   const emailConfig = settings.emailConfig || {};
 
-  const senderEmail = emailConfig.senderEmail || process.env.SENDER_EMAIL || PRIMARY_ADMIN_EMAIL;
-  const senderName = emailConfig.senderName || process.env.SENDER_NAME || 'متجر RYVO الرسمي';
-  const resendApiKey = emailConfig.resendApiKey || process.env.RESEND_API_KEY || DEFAULT_RESEND_API_KEY;
+  const senderEmail = (emailConfig.senderEmail || process.env.SENDER_EMAIL || PRIMARY_ADMIN_EMAIL).trim();
+  const senderName = (emailConfig.senderName || process.env.SENDER_NAME || 'متجر RYVO الرسمي').trim();
+  const rawKey = emailConfig.resendApiKey || process.env.RESEND_API_KEY || DEFAULT_RESEND_API_KEY;
+  const resendApiKey = (rawKey || '').trim();
 
   const logId = 'email_log_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
   const timestamp = new Date().toISOString();
@@ -66,8 +67,11 @@ export async function sendRealEmail(options: EmailDispatchOptions): Promise<{ su
     try {
       const resend = new Resend(resendApiKey);
 
-      // Try primary custom domain sender first
-      let fromField = `${senderName} <${senderEmail}>`;
+      // Note: Resend API requires sending from onboarding@resend.dev unless sending domain is verified in Resend dashboard.
+      // Free Gmail addresses (e.g., @gmail.com) cannot be used as the 'from' domain.
+      const isGmailOrPublicDomain = senderEmail.endsWith('@gmail.com') || senderEmail.endsWith('@yahoo.com') || senderEmail.endsWith('@hotmail.com');
+      const fromAddress = isGmailOrPublicDomain ? 'onboarding@resend.dev' : senderEmail;
+      const fromField = `${senderName} <${fromAddress}>`;
       
       let resendResponse = await resend.emails.send({
         from: fromField,
@@ -78,10 +82,10 @@ export async function sendRealEmail(options: EmailDispatchOptions): Promise<{ su
         replyTo: PRIMARY_ADMIN_EMAIL
       });
 
-      // Handle unverified domain on Resend free accounts cleanly
+      // Handle unverified domain on Resend free accounts or domain errors cleanly
       if (resendResponse.error) {
         const errStr = JSON.stringify(resendResponse.error).toLowerCase();
-        if (errStr.includes('domain') || errStr.includes('verify') || errStr.includes('validation')) {
+        if (fromAddress !== 'onboarding@resend.dev' && (errStr.includes('domain') || errStr.includes('verify') || errStr.includes('validation') || errStr.includes('testing_only'))) {
           console.warn("⚠️ Resend domain unverified for custom sender, retrying with onboarding@resend.dev...");
           resendResponse = await resend.emails.send({
             from: `${senderName} <onboarding@resend.dev>`,

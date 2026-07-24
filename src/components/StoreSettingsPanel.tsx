@@ -57,12 +57,12 @@ export default function StoreSettingsPanel({ settings, onSaveSettings, isRtl }: 
   );
 
   // Email Config State
-  const [senderEmail, setSenderEmail] = useState(settings.emailConfig?.senderEmail || 'support@ryvo.shop');
+  const [senderEmail, setSenderEmail] = useState(settings.emailConfig?.senderEmail || 'ryvo.shopa@gmail.com');
   const [senderName, setSenderName] = useState(settings.emailConfig?.senderName || 'متجر RYVO الرسمي');
-  const [smtpHost, setSmtpHost] = useState(settings.emailConfig?.smtpHost || '');
-  const [smtpPort, setSmtpPort] = useState(settings.emailConfig?.smtpPort || 587);
-  const [smtpSecure, setSmtpSecure] = useState(settings.emailConfig?.smtpSecure || false);
-  const [smtpUser, setSmtpUser] = useState(settings.emailConfig?.smtpUser || '');
+  const [smtpHost, setSmtpHost] = useState(settings.emailConfig?.smtpHost || 'smtp.gmail.com');
+  const [smtpPort, setSmtpPort] = useState(settings.emailConfig?.smtpPort || 465);
+  const [smtpSecure, setSmtpSecure] = useState(settings.emailConfig?.smtpSecure !== undefined ? settings.emailConfig.smtpSecure : true);
+  const [smtpUser, setSmtpUser] = useState(settings.emailConfig?.smtpUser || 'ryvo.shopa@gmail.com');
   const [smtpPass, setSmtpPass] = useState(settings.emailConfig?.smtpPass || '');
 
   // Modal / Toast states
@@ -80,12 +80,13 @@ export default function StoreSettingsPanel({ settings, onSaveSettings, isRtl }: 
   const [logFilterStatus, setLogFilterStatus] = useState<'all' | 'Sent' | 'Failed'>('all');
   const [logSearchQuery, setLogSearchQuery] = useState('');
 
-  // Prelaunch Subscribers state
+  // Prelaunch & Bulk Email Subscribers state
   const [subscribers, setSubscribers] = useState<PrelaunchSubscriber[]>([]);
   const [isFetchingSubscribers, setIsFetchingSubscribers] = useState(false);
   const [showBroadcastModal, setShowBroadcastModal] = useState(false);
   const [broadcastSubject, setBroadcastSubject] = useState('🎉 تم افتتاح متجر RYVO رسمياً! ابدأ التسوق الآن');
-  const [broadcastMessage, setBroadcastMessage] = useState('يسعدنا إعلان الانطلاق الرسمي لمتجر RYVO! تصفح أفضل المنتجات مع عروض الافتتاح الحصرية.');
+  const [broadcastMessage, setBroadcastMessage] = useState('يسعدنا إعلان الانطلاق الرسمي لمتجر RYVO! تصفح أفضل المنتجات مع عروض الافتتاح الحصرية والفاخرة.');
+  const [broadcastRecipientGroup, setBroadcastRecipientGroup] = useState<'all' | 'subscribers' | 'prelaunch' | 'registered_users'>('all');
   const [isSendingBroadcast, setIsSendingBroadcast] = useState(false);
 
   useEffect(() => {
@@ -198,19 +199,23 @@ export default function StoreSettingsPanel({ settings, onSaveSettings, isRtl }: 
   const handleSendBroadcast = async () => {
     setIsSendingBroadcast(true);
     try {
-      const res = await fetch('/api/prelaunch/broadcast', {
+      const res = await fetch('/api/admin/bulk-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          customSubject: broadcastSubject,
-          customMessage: broadcastMessage
+          subject: broadcastSubject,
+          title: broadcastSubject,
+          messageHtml: broadcastMessage,
+          recipientGroup: broadcastRecipientGroup,
+          ctaText: 'تصفح العروض الآن 🛍️',
+          ctaUrl: 'https://ryvo.shop'
         })
       });
       const data = await res.json();
       if (data.success) {
-        showNotification('success', isRtl ? `تم إرسال بريد الافتتاح الجماعي بنجاح إلى ${data.sentCount} مشترك! 🎉` : `Broadcast sent to ${data.sentCount} subscribers!`);
+        showNotification('success', isRtl ? `تم إرسال البريد الجماعي بنجاح إلى ${data.report?.successCount || 0} مستلم! 🎉` : `Broadcast sent successfully!`);
         setShowBroadcastModal(false);
-        fetchSubscribers();
+        fetchLogs();
       } else {
         showNotification('error', data.error || 'فشل إرسال الإعلان الجماعي');
       }
@@ -957,6 +962,22 @@ export default function StoreSettingsPanel({ settings, onSaveSettings, isRtl }: 
             </h3>
 
             <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  {isRtl ? 'الفئة المستهدفة للإرسال' : 'Target Recipient Audience'}
+                </label>
+                <select
+                  value={broadcastRecipientGroup}
+                  onChange={(e) => setBroadcastRecipientGroup(e.target.value as any)}
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-bold text-xs outline-none"
+                >
+                  <option value="all">{isRtl ? 'جميع القوائم المسجلة (المشتركين + قائمة الانتظار + العملاء)' : 'All Lists (Subscribers + Prelaunch + Customers)'}</option>
+                  <option value="subscribers">{isRtl ? 'مشتركي النشرة البريدية فقط' : 'Newsletter Subscribers Only'}</option>
+                  <option value="prelaunch">{isRtl ? 'قائمة انتظار الافتتاح فقط' : 'Prelaunch Subscribers Only'}</option>
+                  <option value="registered_users">{isRtl ? 'العملاء المسجلين بالمتجر فقط' : 'Registered Customers Only'}</option>
+                </select>
+              </div>
+
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                   {isRtl ? 'عنوان الرسالة (Subject)' : 'Email Subject'}

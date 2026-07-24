@@ -28,7 +28,16 @@ import {
   setLogLevel as clientSetLogLevel,
   terminate as clientTerminate
 } from "firebase/firestore";
-import { sendRealEmail, fetchEmailLogs, buildHtmlEmailTemplate } from "./server/services/emailService.js";
+import { 
+  sendRealEmail, 
+  fetchEmailLogs, 
+  buildHtmlEmailTemplate, 
+  sendCustomerOrderStatusEmail, 
+  sendAdminNewOrderNotification, 
+  sendAdminSupportRequestNotification, 
+  sendBulkNewsletterEmails, 
+  PRIMARY_ADMIN_EMAIL 
+} from "./server/services/emailService.js";
 
 
 // Suppress internal Firebase Client Firestore SDK debug and error logs to ensure clean logs
@@ -1894,29 +1903,15 @@ app.post("/api/orders", async (req, res) => {
 
     await setDoc(doc(db, "orders", o.id), o);
 
-    // Send real email confirmation to customer
+    // 1. Send real automated order confirmation email to customer
     if (o.user_email) {
-      sendRealEmail({
-        to: o.user_email,
-        subject: `تأكيد استلام الطلب #${o.id} - متجر RYVO`,
-        html: buildHtmlEmailTemplate(
-          `تأكيد استلام الطلب #${o.id}`,
-          `أهلاً بك ${o.customer_name || 'عزيزي العميل'}!`,
-          `<p>شكراً لشرائك من متجر RYVO الرسمي. تم استلام طلبك بنجاح وهو الآن قيد المراجعة والمعالجة.</p>
-           <div style="background:#f8fafc; padding:16px; border-radius:12px; border:1px solid #e2e8f0; margin:16px 0;">
-             <p style="margin:4px 0;"><strong>رقم الطلب:</strong> #${o.id}</p>
-             <p style="margin:4px 0;"><strong>الإجمالي:</strong> ${o.total} ر.س</p>
-             <p style="margin:4px 0;"><strong>طريقة الدفع:</strong> ${o.payment_method === 'cod' ? 'الدفع عند الاستلام' : o.payment_method}</p>
-             <p style="margin:4px 0;"><strong>عنوان التوصيل:</strong> ${o.address || ''} (${o.phone || ''})</p>
-           </div>`,
-          `متابعة حالة الطلب`,
-          `https://ryvo.shop/account/orders`
-        ),
-        triggerEvent: 'order_confirmation',
-        db,
-        getSettings
-      }).catch(err => console.error("Email send error on order creation:", err));
+      sendCustomerOrderStatusEmail(o, 'pending', undefined, db, getSettings)
+        .catch(err => console.error("Customer confirmation email send error:", err));
     }
+
+    // 2. Send immediate admin notification email to ryvo.shopa@gmail.com
+    sendAdminNewOrderNotification(o, db, getSettings)
+      .catch(err => console.error("Admin new order alert email send error:", err));
 
     res.json({ success: true, order: o });
   } catch (e: any) {
@@ -1947,35 +1942,11 @@ app.post("/api/orders/update-status", async (req, res) => {
     }
     await updateDoc(docRef, updatePayload);
 
-    // Send real email notification on order status change
+    // Send real automated email notification on order status change
     if (o.user_email) {
-      const statusNamesAr: Record<string, string> = {
-        pending: 'قيد الانتظار',
-        processing: 'قيد المعالجة والتجهيز',
-        shipped: 'تم الشحن وتسليم الشحنة لشركة النقل 🚚',
-        delivered: 'تم التوصيل بنجاح 🎁',
-        cancelled: 'تم إلغاء الطلب ❌'
-      };
-      const statusAr = statusNamesAr[status] || status;
-      let triggerEvt: any = 'order_status_update';
-      if (status === 'shipped') triggerEvt = 'order_shipping';
-      else if (status === 'cancelled') triggerEvt = 'order_cancellation';
-
-      let bodyHtml = `<p>يسعدنا إفادتك بأنه تم تغيير حالة طلبك رقم <strong>#${id}</strong> إلى: <span style="color:#0284c7; font-weight:800;">${statusAr}</span>.</p>`;
-      if (tracking_number) {
-        bodyHtml += `<div style="background:#f0f9ff; padding:16px; border-radius:12px; border:1px solid #bae6fd; margin:16px 0;">
-          <p style="margin:0; font-weight:700; color:#0369a1;">📦 رقم التتبع الخاص بالشحنة: <span style="font-family:monospace; font-size:18px;">${tracking_number}</span></p>
-        </div>`;
-      }
-
-      sendRealEmail({
-        to: o.user_email,
-        subject: `تحديث حالة الطلب #${id} (${statusAr}) - متجر RYVO`,
-        html: buildHtmlEmailTemplate(`تحديث حالة الطلب #${id}`, `أهلاً بك ${o.customer_name || 'عزيزي العميل'}!`, bodyHtml, `عرض تفاصيل الطلب`, `https://ryvo.shop/account/orders`),
-        triggerEvent: triggerEvt,
-        db,
-        getSettings
-      }).catch(err => console.error("Email send error on status update:", err));
+      const fullOrderObj = { ...o, id, tracking_number: tracking_number || o.tracking_number };
+      sendCustomerOrderStatusEmail(fullOrderObj, status, tracking_number, db, getSettings)
+        .catch(err => console.error("Email send error on status update:", err));
     }
 
     res.json({ success: true });
@@ -2522,6 +2493,94 @@ app.post("/api/email/test", requireAdmin, async (req, res) => {
     });
 
     res.json({ success: result.success, message: result.success ? "تم إرسال البريد الاختباري بنجاح!" : "فشل إرسال البريد الاختباري: " + result.log.errorMessage, log: result.log });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// BULK EMAIL / NEWSLETTER DISPATCH ENDPOINT
+app.post("/api/admin/bulk-email", requireAdmin, async (req, res) => {
+  try {
+    const { subject, title, messageHtml, ctaText, ctaUrl, recipientGroup, customEmails } = req.body;
+
+    if (!subject || !messageHtml) {
+      return res.status(400).json({ error: "عنوان الرسالة ومحتوى الإيميل مطلوبان" });
+    }
+
+    let recipientList: string[] = [];
+
+    // Fetch prelaunch subscribers
+    if (recipientGroup === 'prelaunch' || recipientGroup === 'all') {
+      if (db) {
+        try {
+          const snap = await db.collection("prelaunch_subscribers").get();
+          if (snap && snap.docs) {
+            snap.docs.forEach((d: any) => {
+              const data = d.data();
+              if (data && data.email) recipientList.push(data.email);
+            });
+          }
+        } catch (_) {}
+      }
+    }
+
+    // Fetch newsletter subscribers
+    if (recipientGroup === 'subscribers' || recipientGroup === 'all') {
+      if (db) {
+        try {
+          const colRef = collection(db, "subscribers");
+          const snap = await getDocs(colRef);
+          if (snap && snap.docs) {
+            snap.docs.forEach((d: any) => {
+              const data = d.data();
+              if (data && data.email) recipientList.push(data.email);
+            });
+          }
+        } catch (_) {}
+      }
+    }
+
+    // Fetch registered store users
+    if (recipientGroup === 'registered_users' || recipientGroup === 'all') {
+      if (db) {
+        try {
+          const colRef = collection(db, "users");
+          const snap = await getDocs(colRef);
+          if (snap && snap.docs) {
+            snap.docs.forEach((d: any) => {
+              const data = d.data();
+              if (data && data.email) recipientList.push(data.email);
+            });
+          }
+        } catch (_) {}
+      }
+    }
+
+    // Append custom email strings
+    if (Array.isArray(customEmails) && customEmails.length > 0) {
+      recipientList.push(...customEmails);
+    }
+
+    if (recipientList.length === 0) {
+      return res.status(400).json({ error: "لم يتم العثور على أي مستلمين في الفئة المحددة!" });
+    }
+
+    const report = await sendBulkNewsletterEmails({
+      subject,
+      title: title || subject,
+      contentHtml: messageHtml,
+      ctaText,
+      ctaUrl,
+      recipients: recipientList,
+      db,
+      getSettings
+    });
+
+    res.json({
+      success: true,
+      message: `تم إرسال البريد الجماعي بنجاح إلى ${report.successCount} من أصل ${report.total} مستلم!`,
+      report
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -4742,6 +4801,16 @@ app.post("/api/support/conversations/:id/message", async (req, res) => {
           if (io) {
             io.to(`conversation_${decodedId}`).emit('status_updated', { status: 'PENDING_CUSTOMER_APPROVAL', ai_summary: summary });
           }
+
+          // Trigger email alert to admin
+          sendAdminSupportRequestNotification(
+            conversation.clientEmail || decodedId,
+            conversation.clientName || 'عميل المتجر',
+            message || 'استفسار يتطلب الدعم البشري',
+            conversation.id,
+            db,
+            getSettings
+          ).catch(err => console.error("Admin support email error:", err));
         } else {
           if (conversation.status !== 'AI_HANDLING') {
             await dbSupportService.updateConversationStatus(conversation.id, 'AI_HANDLING');

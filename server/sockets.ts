@@ -13,6 +13,7 @@ import {
   generateSmartSummary,
   transcribeAudio
 } from './services/aiSupportService';
+import { sendAdminSupportRequestNotification } from './services/emailService';
 
 export const connectedAdmins = new Set<string>();
 
@@ -251,6 +252,14 @@ export function initSockets(io: Server) {
           clientEmail: conversation.clientEmail,
           ai_summary: conversation.ai_summary
         });
+
+        // Trigger email notification to admin
+        sendAdminSupportRequestNotification(
+          conversation.clientEmail || cleanSessionId,
+          conversation.clientName || 'عميل المتجر',
+          `طلب العميل التحدث مع فريق الدعم الفني البشري. ملخص الذكاء الاصطناعي: ${conversation.ai_summary || 'جديد'}`,
+          cleanSessionId
+        ).catch(err => console.error("Admin support email notify error:", err));
 
         await addSupportLog(`User approved transfer to human agent. Ticket created and queued.`, 'Customer');
       }

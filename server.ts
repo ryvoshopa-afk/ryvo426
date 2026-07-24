@@ -2253,7 +2253,7 @@ app.post("/api/auth/register", async (req, res) => {
 
     const verifyToken = "vtoken_" + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
     const baseUrl = getBaseUrl(req);
-    const confirmUrl = `${baseUrl}/api/auth/confirm-email?token=${verifyToken}&email=${encodeURIComponent(cleanEmail)}`;
+    const confirmUrl = `${baseUrl}/verify?token=${verifyToken}&email=${encodeURIComponent(cleanEmail)}`;
 
     const newUser = {
       email: cleanEmail,
@@ -2367,7 +2367,7 @@ app.post("/api/auth/verify-email", async (req, res) => {
     const verifyCode = Math.floor(100000 + Math.random() * 900000).toString();
     const verifyToken = "vtoken_" + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
     const baseUrl = getBaseUrl(req);
-    const confirmUrl = `${baseUrl}/api/auth/confirm-email?token=${verifyToken}&email=${encodeURIComponent(cleanEmail)}`;
+    const confirmUrl = `${baseUrl}/verify?token=${verifyToken}&email=${encodeURIComponent(cleanEmail)}`;
 
     if (db) {
       try {
@@ -2407,7 +2407,7 @@ app.post("/api/auth/verify-email", async (req, res) => {
   }
 });
 
-// EMAIL ACTIVATION / CONFIRMATION GET ENDPOINTS (Prevents 404 on link clicks!)
+// EMAIL ACTIVATION / CONFIRMATION ENDPOINTS (Supports both POST API and GET browser links)
 const emailConfirmRoutes = [
   "/api/auth/confirm-email",
   "/api/auth/verify-email",
@@ -2418,6 +2418,34 @@ const emailConfirmRoutes = [
   "/confirm-account",
   "/verify-email"
 ];
+
+app.post(emailConfirmRoutes, async (req, res) => {
+  const token = (req.body.token || req.query.token || req.body.code || '').trim();
+  const email = (req.body.email || req.query.email || '').trim().toLowerCase();
+
+  if (email && db) {
+    try {
+      const userRef = doc(db, "users", email);
+      await updateDoc(userRef, { emailVerified: true, status: "active" });
+    } catch (_) {}
+
+    try {
+      await db.collection("email_verifications").doc(email).set({
+        email,
+        token,
+        status: "verified",
+        verifiedAt: new Date().toISOString()
+      }, { merge: true });
+    } catch (_) {}
+  }
+
+  res.json({
+    success: true,
+    message: "تم تأكيد وتفعيل بريدك الإلكتروني بنجاح! يمكنك الآن تسجيل الدخول واستخدام كافة ميزات المتجر.",
+    email,
+    verified: true
+  });
+});
 
 app.get(emailConfirmRoutes, async (req, res) => {
   const token = (req.query.token as string || req.query.code as string || '').trim();

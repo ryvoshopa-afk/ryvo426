@@ -14,6 +14,7 @@ import { smartFetch } from './utils/smartFetch';
 import Navbar from './components/Navbar';
 import Hero from './components/Hero';
 import ProductCard from './components/ProductCard';
+import { EmailVerificationModal } from './components/EmailVerificationModal';
 
 // Components (Non-critical Render Path - Loaded dynamically via React.lazy)
 const ProductDetailsModal = lazy(() => import('./components/ProductDetailsModal'));
@@ -527,6 +528,8 @@ export default function App() {
   const [storeSettings, setStoreSettings] = useState<StoreSettings | undefined>(undefined);
   const [showPrelaunchModal, setShowPrelaunchModal] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [isVerificationModalOpen, setIsVerificationModalOpen] = useState(false);
+  const [verificationParams, setVerificationParams] = useState<{ token?: string; email?: string; alreadyVerified?: boolean }>({});
 
   const [welcomeBarMinimized, setWelcomeBarMinimized] = useState(false);
   const [welcomeBarCopied, setWelcomeBarCopied] = useState(false);
@@ -534,28 +537,29 @@ export default function App() {
     setToastMessage(msg);
   };
 
-  // Auto-detect email verification tokens or success redirects in URL query params
+  // Auto-detect email verification tokens or routes in URL query params or pathname
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
+    const pathname = window.location.pathname;
     const verified = urlParams.get('verified');
     const token = urlParams.get('token');
     const email = urlParams.get('email');
 
-    if (verified === 'true') {
-      triggerToast(language === 'ar' ? 'تم تأكيد وتفعيل بريدك الإلكتروني بنجاح! 🎉' : 'Your email has been verified successfully! 🎉');
+    const isVerificationRoute = 
+      pathname.includes('/verify') || 
+      pathname.includes('/confirm-email') || 
+      pathname.includes('/confirm-account') || 
+      Boolean(token) || 
+      verified === 'true';
+
+    if (isVerificationRoute) {
+      setVerificationParams({
+        token: token || undefined,
+        email: email || undefined,
+        alreadyVerified: verified === 'true'
+      });
+      setIsVerificationModalOpen(true);
       window.history.replaceState({}, document.title, window.location.pathname);
-    } else if (token && email) {
-      fetch(`/api/auth/confirm-email?token=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`)
-        .then(res => res.json())
-        .then(data => {
-          if (data.success) {
-            triggerToast(language === 'ar' ? 'تم تأكيد وتفعيل بريدك الإلكتروني بنجاح! 🎉' : 'Your email has been verified successfully! 🎉');
-          }
-        })
-        .catch(() => {})
-        .finally(() => {
-          window.history.replaceState({}, document.title, window.location.pathname);
-        });
     }
   }, [language]);
 
@@ -2377,6 +2381,17 @@ export default function App() {
           onAuthSuccess={handleAuthSuccess}
         />
       )}
+
+      {/* MODAL 4.5: Email Verification Modal */}
+      <EmailVerificationModal
+        isOpen={isVerificationModalOpen}
+        onClose={() => setIsVerificationModalOpen(false)}
+        token={verificationParams.token}
+        email={verificationParams.email}
+        alreadyVerified={verificationParams.alreadyVerified}
+        language={language}
+        onOpenAuth={() => setIsAuthOpen(true)}
+      />
 
       {/* MODAL 5: Google SEO XML & TXT audit inspect dialog */}
       {seoModalType && (

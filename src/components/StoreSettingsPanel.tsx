@@ -59,6 +59,7 @@ export default function StoreSettingsPanel({ settings, onSaveSettings, isRtl }: 
   // Email Config State
   const [senderEmail, setSenderEmail] = useState(settings.emailConfig?.senderEmail || 'ryvo.shopa@gmail.com');
   const [senderName, setSenderName] = useState(settings.emailConfig?.senderName || 'متجر RYVO الرسمي');
+  const [resendApiKey, setResendApiKey] = useState(settings.emailConfig?.resendApiKey || 're_STwDkaCe_CU2mJyDXRejPaU4RZdwvN9h7');
   const [smtpHost, setSmtpHost] = useState(settings.emailConfig?.smtpHost || 'smtp.gmail.com');
   const [smtpPort, setSmtpPort] = useState(settings.emailConfig?.smtpPort || 465);
   const [smtpSecure, setSmtpSecure] = useState(settings.emailConfig?.smtpSecure !== undefined ? settings.emailConfig.smtpSecure : true);
@@ -121,6 +122,7 @@ export default function StoreSettingsPanel({ settings, onSaveSettings, isRtl }: 
         emailConfig: {
           senderEmail,
           senderName,
+          resendApiKey,
           smtpHost,
           smtpPort: Number(smtpPort),
           smtpSecure,
@@ -613,8 +615,24 @@ export default function StoreSettingsPanel({ settings, onSaveSettings, isRtl }: 
                   value={senderEmail}
                   onChange={(e) => setSenderEmail(e.target.value)}
                   className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-bold text-xs focus:ring-2 focus:ring-sky-500 outline-none"
-                  placeholder="support@ryvo.shop"
+                  placeholder="ryvo.shopa@gmail.com"
                 />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  {isRtl ? 'مفتاح Resend API (Resend API Key)' : 'Resend API Key'}
+                </label>
+                <input
+                  type="password"
+                  value={resendApiKey}
+                  onChange={(e) => setResendApiKey(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl border border-sky-500/30 dark:border-sky-500/30 bg-sky-500/5 text-sky-400 font-mono font-bold text-xs focus:ring-2 focus:ring-sky-500 outline-none"
+                  placeholder="re_..."
+                />
+                <p className="text-[10px] text-sky-400/80 mt-1">
+                  {isRtl ? '⚡ خدمة Resend API مفعلة لمعالجة الإرسال الفوري وتجاوز حظر المنافذ Timeout' : '⚡ Resend API active for zero-latency email dispatch'}
+                </p>
               </div>
             </div>
 

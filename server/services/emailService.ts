@@ -1,4 +1,4 @@
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 
 export interface EmailDispatchOptions {
   to: string;
@@ -42,21 +42,17 @@ export interface EmailLogEntry {
 // Memory buffer for logs if DB is loading
 let inMemoryLogs: EmailLogEntry[] = [];
 
-// Primary default admin email
+// Primary default admin email & Resend credentials
 export const PRIMARY_ADMIN_EMAIL = 'ryvo.shopa@gmail.com';
+export const DEFAULT_RESEND_API_KEY = 're_STwDkaCe_CU2mJyDXRejPaU4RZdwvN9h7';
 
 export async function sendRealEmail(options: EmailDispatchOptions): Promise<{ success: boolean; log: EmailLogEntry }> {
   const settings = options.getSettings ? options.getSettings() : {};
   const emailConfig = settings.emailConfig || {};
 
-  const senderEmail = emailConfig.senderEmail || process.env.SENDER_EMAIL || process.env.SMTP_USER || PRIMARY_ADMIN_EMAIL;
+  const senderEmail = emailConfig.senderEmail || process.env.SENDER_EMAIL || PRIMARY_ADMIN_EMAIL;
   const senderName = emailConfig.senderName || process.env.SENDER_NAME || 'متجر RYVO الرسمي';
-  
-  const smtpHost = emailConfig.smtpHost || process.env.SMTP_HOST || 'smtp.gmail.com';
-  const smtpPort = Number(emailConfig.smtpPort || process.env.SMTP_PORT || 465);
-  const smtpSecure = emailConfig.smtpSecure !== undefined ? emailConfig.smtpSecure : (smtpPort === 465);
-  const smtpUser = emailConfig.smtpUser || process.env.SMTP_USER || PRIMARY_ADMIN_EMAIL;
-  const smtpPass = emailConfig.smtpPass || process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD || '';
+  const resendApiKey = emailConfig.resendApiKey || process.env.RESEND_API_KEY || DEFAULT_RESEND_API_KEY;
 
   const logId = 'email_log_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
   const timestamp = new Date().toISOString();
@@ -65,39 +61,51 @@ export async function sendRealEmail(options: EmailDispatchOptions): Promise<{ su
   let logStatus: 'Sent' | 'Failed' = 'Sent';
   let errorMessage: string | undefined = undefined;
 
-  // Build Nodemailer transport with family: 4 to force IPv4 and fix ENETUNREACH on Cloud Run containers
-  try {
-    const transporter = nodemailer.createTransport({
-      host: smtpHost,
-      port: smtpPort,
-      secure: smtpSecure,
-      auth: smtpUser && smtpPass ? {
-        user: smtpUser,
-        pass: smtpPass
-      } : undefined,
-      family: 4, // CRITICAL: Force IPv4 DNS resolution to prevent ENETUNREACH network errors on Cloud Run
-      tls: {
-        rejectUnauthorized: false
-      }
-    } as any);
+  // Primary: Use Resend API for instant delivery without port/timeout blocks
+  if (resendApiKey) {
+    try {
+      const resend = new Resend(resendApiKey);
 
-    if (smtpUser && smtpPass) {
-      await transporter.sendMail({
-        from: `"${senderName}" <${senderEmail}>`,
-        to: options.to,
+      // Try primary custom domain sender first
+      let fromField = `${senderName} <${senderEmail}>`;
+      
+      let resendResponse = await resend.emails.send({
+        from: fromField,
+        to: [options.to],
         subject: options.subject,
         html: options.html,
-        text: options.text || options.html.replace(/<[^>]+>/g, ' ')
+        text: options.text || options.html.replace(/<[^>]+>/g, ' '),
+        replyTo: PRIMARY_ADMIN_EMAIL
       });
 
-      console.log(`📧 [REAL EMAIL DISPATCH SUCCESS] Sent email to ${options.to} (${options.subject}) via ${smtpHost}`);
-    } else {
-      console.log(`ℹ️ [EMAIL LOGGED] SMTP pass not set for ${smtpUser}. Logged email dispatch as Sent (Simulated Mode) to ${options.to}`);
+      // Handle unverified domain on Resend free accounts cleanly
+      if (resendResponse.error) {
+        const errStr = JSON.stringify(resendResponse.error).toLowerCase();
+        if (errStr.includes('domain') || errStr.includes('verify') || errStr.includes('validation')) {
+          console.warn("⚠️ Resend domain unverified for custom sender, retrying with onboarding@resend.dev...");
+          resendResponse = await resend.emails.send({
+            from: `${senderName} <onboarding@resend.dev>`,
+            to: [options.to],
+            subject: options.subject,
+            html: options.html,
+            text: options.text || options.html.replace(/<[^>]+>/g, ' '),
+            replyTo: PRIMARY_ADMIN_EMAIL
+          });
+        }
+      }
+
+      if (resendResponse.error) {
+        throw new Error(resendResponse.error.message || 'Resend API dispatch failed');
+      }
+
+      console.log(`📧 [RESEND DISPATCH SUCCESS] Sent email to ${options.to} (${options.subject}) - ID: ${resendResponse.data?.id}`);
+    } catch (err: any) {
+      logStatus = 'Failed';
+      errorMessage = err.message || String(err);
+      console.error(`❌ [RESEND DISPATCH ERROR] Failed to send email to ${options.to}:`, errorMessage);
     }
-  } catch (err: any) {
-    logStatus = 'Failed';
-    errorMessage = err.message || String(err);
-    console.error(`❌ [REAL EMAIL DISPATCH ERROR] Failed to send email to ${options.to}:`, errorMessage);
+  } else {
+    console.log(`ℹ️ [EMAIL LOGGED] No Resend API key available. Email logged in simulated mode for ${options.to}`);
   }
 
   const logEntry: EmailLogEntry = {

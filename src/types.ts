@@ -274,6 +274,7 @@ export interface StoreSettings {
 export interface EmailConfig {
   senderEmail: string;
   senderName: string;
+  resendApiKey?: string;
   smtpHost?: string;
   smtpPort?: number;
   smtpSecure?: boolean;

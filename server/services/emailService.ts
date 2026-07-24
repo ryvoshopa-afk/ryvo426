@@ -46,6 +46,30 @@ let inMemoryLogs: EmailLogEntry[] = [];
 export const PRIMARY_ADMIN_EMAIL = 'ryvo.shopa@gmail.com';
 export const DEFAULT_RESEND_API_KEY = 're_STwDkaCe_CU2mJyDXRejPaU4RZdwvN9h7';
 
+/**
+ * Utility to resolve the application's base URL dynamically.
+ * Priority: APP_URL / BASE_URL env > Request Host Header > Default Domain (https://ryvo.shop)
+ */
+export function getBaseUrl(req?: any): string {
+  if (process.env.APP_URL && process.env.APP_URL.trim()) {
+    return process.env.APP_URL.trim().replace(/\/$/, '');
+  }
+  if (process.env.BASE_URL && process.env.BASE_URL.trim()) {
+    return process.env.BASE_URL.trim().replace(/\/$/, '');
+  }
+  if (process.env.PUBLIC_URL && process.env.PUBLIC_URL.trim()) {
+    return process.env.PUBLIC_URL.trim().replace(/\/$/, '');
+  }
+  if (req) {
+    const proto = req.headers?.['x-forwarded-proto'] || req.protocol || 'https';
+    const host = req.headers?.['x-forwarded-host'] || req.headers?.host || (typeof req.get === 'function' ? req.get('host') : undefined);
+    if (host && !host.includes('localhost') && !host.includes('127.0.0.1')) {
+      return `${proto}://${host}`;
+    }
+  }
+  return 'https://ryvo.shop';
+}
+
 export async function sendRealEmail(options: EmailDispatchOptions): Promise<{ success: boolean; log: EmailLogEntry }> {
   const settings = options.getSettings ? options.getSettings() : {};
   const emailConfig = settings.emailConfig || {};

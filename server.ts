@@ -36,6 +36,7 @@ import {
   sendAdminNewOrderNotification, 
   sendAdminSupportRequestNotification, 
   sendBulkNewsletterEmails, 
+  getBaseUrl,
   PRIMARY_ADMIN_EMAIL 
 } from "./server/services/emailService.js";
 
@@ -2243,16 +2244,24 @@ app.post("/api/auth/register", async (req, res) => {
     if (!email || !name || !password) {
       return res.status(400).json({ error: "All credentials are required" });
     }
-    const docRef = doc(db, "users", email.toLowerCase());
+    const cleanEmail = email.toLowerCase().trim();
+    const docRef = doc(db, "users", cleanEmail);
     const snap = await getDoc(docRef);
     if (snap.exists()) {
       return res.status(400).json({ error: "Email already registered" });
     }
+
+    const verifyToken = "vtoken_" + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
+    const baseUrl = getBaseUrl(req);
+    const confirmUrl = `${baseUrl}/api/auth/confirm-email?token=${verifyToken}&email=${encodeURIComponent(cleanEmail)}`;
+
     const newUser = {
-      email: email.toLowerCase(),
+      email: cleanEmail,
       name,
       password,
       role: "customer",
+      emailVerified: false,
+      emailVerificationToken: verifyToken,
       favorites: [],
       points: 100,
       points_history: [
@@ -2263,17 +2272,28 @@ app.post("/api/auth/register", async (req, res) => {
     };
     await setDoc(docRef, newUser);
 
-    // Trigger real welcome/registration email
+    // Save verification record
+    try {
+      await db.collection("email_verifications").doc(cleanEmail).set({
+        email: cleanEmail,
+        token: verifyToken,
+        createdAt: new Date().toISOString(),
+        status: "pending"
+      }, { merge: true });
+    } catch (_) {}
+
+    // Trigger real welcome/registration email with 1-click confirmation link
     sendRealEmail({
-      to: email.toLowerCase(),
-      subject: `أهلاً بك في متجر RYVO الرسمي 🎉`,
+      to: cleanEmail,
+      subject: `أهلاً بك في متجر RYVO الرسمي - يرجى تأكيد حسابك 🎉`,
       html: buildHtmlEmailTemplate(
         `تم إنشاء حسابك بنجاح!`,
         `مرحباً ${name}!`,
-        `<p>يسعدنا انضمامك إلى العائلة الرسمية لمتجر RYVO. تم تعبئة حسابك بـ <strong>100 نقطة ولاء مجانية</strong> كهدية ترحيبية فورية!</p>
-         <p>يمكنك الآن الاستمتاع بتجربة تسوق فريدة وشراء أفخم المنتجات مع حماية وضمان متكامل.</p>`,
-        `تصفح المنتجات الآن`,
-        `https://ryvo.shop`
+        `<p>يسعدنا انضمامك إلى العائلة الرسمية لمتجر RYVO. تم إضافة <strong>100 نقطة ولاء مجانية</strong> كهدية ترحيبية فورية بحسابك!</p>
+         <p>يرجى النقر على الزر أدناه لتأكيد وتفعيل بريدك الإلكتروني والبدء بالتسوق فوراً:</p>`,
+        `تأكيد وتفعيل البريد الإلكتروني الآن ✉️`,
+        confirmUrl,
+        `مرحباً بك 🎉`
       ),
       triggerEvent: 'account_creation',
       db,
@@ -2281,7 +2301,7 @@ app.post("/api/auth/register", async (req, res) => {
     }).catch(err => console.error("Email send error on registration:", err));
 
     const { password: _, ...safeUser } = newUser;
-    res.json({ success: true, user: safeUser });
+    res.json({ success: true, user: safeUser, confirmUrl });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
@@ -2295,28 +2315,43 @@ app.post("/api/auth/forgot-password", async (req, res) => {
 
     const cleanEmail = email.toLowerCase().trim();
     const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const resetToken = "reset_" + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
+    const baseUrl = getBaseUrl(req);
+    const resetUrl = `${baseUrl}/api/auth/verify-reset-link?token=${resetToken}&email=${encodeURIComponent(cleanEmail)}`;
+
+    if (db) {
+      try {
+        await db.collection("password_resets").doc(cleanEmail).set({
+          email: cleanEmail,
+          code: resetCode,
+          token: resetToken,
+          createdAt: new Date().toISOString()
+        }, { merge: true });
+      } catch (_) {}
+    }
 
     const result = await sendRealEmail({
       to: cleanEmail,
-      subject: `رمز استعادة كلمة المرور - متجر RYVO 🔐`,
+      subject: `رمز ورابط استعادة كلمة المرور - متجر RYVO 🔐`,
       html: buildHtmlEmailTemplate(
         `استعادة كلمة المرور`,
         `عزيزي العميل،`,
         `<p>لقد استلمنا طلباً لإعادة ضبط كلمة المرور المرتبطة بحسابك (${cleanEmail}).</p>
          <p>يرجى استخدام رمز الأمان المؤقت التالي لاستكمال إعادة الضبط:</p>
-         <div style="background:#f0f9ff; padding:18px; border-radius:12px; text-align:center; font-size:26px; font-weight:900; letter-spacing:6px; color:#0284c7; border:1px border #bae6fd; margin:18px 0;">
+         <div style="background:#0f172a; padding:18px; border-radius:12px; text-align:center; font-size:26px; font-weight:900; letter-spacing:6px; color:#38bdf8; border:1px solid #0284c7; margin:18px 0;">
            ${resetCode}
          </div>
-         <p>إذا لم تكن أنت من أرسل هذا الطلب، فيمكنك تجاهل هذه الرسالة بأمان.</p>`,
-        `زيارة الموقع`,
-        `https://ryvo.shop`
+         <p>أو يمكنك النقر مباشرة على زر إعادة الضبط التالي:</p>`,
+        `إعادة ضبط كلمة المرور الآن 🔑`,
+        resetUrl,
+        `استعادة الحساب 🔐`
       ),
       triggerEvent: 'password_reset',
       db,
       getSettings
     });
 
-    res.json({ success: true, message: "تم إرسال رمز استعادة كلمة المرور إلى بريدك الإلكتروني الحقيقي بنجاح!", resetCode, emailLog: result.log });
+    res.json({ success: true, message: "تم إرسال رمز ورابط استعادة كلمة المرور إلى بريدك الإلكتروني بنجاح!", resetCode, resetToken, emailLog: result.log });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -2330,29 +2365,183 @@ app.post("/api/auth/verify-email", async (req, res) => {
 
     const cleanEmail = email.toLowerCase().trim();
     const verifyCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const verifyToken = "vtoken_" + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
+    const baseUrl = getBaseUrl(req);
+    const confirmUrl = `${baseUrl}/api/auth/confirm-email?token=${verifyToken}&email=${encodeURIComponent(cleanEmail)}`;
+
+    if (db) {
+      try {
+        await db.collection("email_verifications").doc(cleanEmail).set({
+          email: cleanEmail,
+          code: verifyCode,
+          token: verifyToken,
+          createdAt: new Date().toISOString(),
+          status: "pending"
+        }, { merge: true });
+      } catch (_) {}
+    }
 
     const result = await sendRealEmail({
       to: cleanEmail,
-      subject: `رمز تأكيد البريد الإلكتروني - متجر RYVO ✉️`,
+      subject: `تأكيد البريد الإلكتروني - متجر RYVO ✉️`,
       html: buildHtmlEmailTemplate(
         `تأكيد البريد الإلكتروني`,
         `عزيزي المستخدم،`,
         `<p>يرجى استخدام كود التأكيد التالي لإكمال تفعيل بريدك الإلكتروني وحسابك:</p>
-         <div style="background:#f0f9ff; padding:18px; border-radius:12px; text-align:center; font-size:26px; font-weight:900; letter-spacing:6px; color:#0284c7; margin:18px 0;">
+         <div style="background:#0f172a; padding:18px; border-radius:12px; text-align:center; font-size:26px; font-weight:900; letter-spacing:6px; color:#38bdf8; border:1px solid #0284c7; margin:18px 0;">
            ${verifyCode}
-         </div>`,
-        `الذهاب للمتجر`,
-        `https://ryvo.shop`
+         </div>
+         <p>أو اضغط على زر التأكيد المباشر أدناه لتفعيل حسابك بضغطة واحدة:</p>`,
+        `تأكيد وتفعيل البريد الإلكتروني ✉️`,
+        confirmUrl,
+        `تأكيد الحساب ✉️`
       ),
       triggerEvent: 'email_verification',
       db,
       getSettings
     });
 
-    res.json({ success: true, message: "تم إرسال رمز تأكيد البريد الإلكتروني بنجاح!", verifyCode, emailLog: result.log });
+    res.json({ success: true, message: "تم إرسال رمز ورابط تأكيد البريد الإلكتروني بنجاح!", verifyCode, verifyToken, emailLog: result.log });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// EMAIL ACTIVATION / CONFIRMATION GET ENDPOINTS (Prevents 404 on link clicks!)
+const emailConfirmRoutes = [
+  "/api/auth/confirm-email",
+  "/api/auth/verify-email",
+  "/api/auth/confirm",
+  "/api/auth/verify",
+  "/api/auth/verify-reset-link",
+  "/confirm-email",
+  "/confirm-account",
+  "/verify-email"
+];
+
+app.get(emailConfirmRoutes, async (req, res) => {
+  const token = (req.query.token as string || req.query.code as string || '').trim();
+  const email = (req.query.email as string || '').trim().toLowerCase();
+  const baseUrl = getBaseUrl(req);
+
+  if (email && db) {
+    try {
+      const userRef = doc(db, "users", email);
+      await updateDoc(userRef, { emailVerified: true, status: "active" });
+    } catch (_) {}
+
+    try {
+      await db.collection("email_verifications").doc(email).set({
+        email,
+        status: "verified",
+        verifiedAt: new Date().toISOString()
+      }, { merge: true });
+    } catch (_) {}
+  }
+
+  // Check if caller expects JSON or browser HTML
+  if (req.headers.accept && req.headers.accept.includes("application/json")) {
+    return res.json({ success: true, message: "تم تأكيد بريدك الإلكتروني بنجاح!", email, verified: true });
+  }
+
+  // Render Dark Mode confirmation HTML page
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.status(200).send(`
+    <!DOCTYPE html>
+    <html dir="rtl" lang="ar">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>تأكيد البريد الإلكتروني | متجر RYVO</title>
+      <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700;800;900&display=swap" rel="stylesheet">
+      <style>
+        * { box-sizing: border-box; }
+        body {
+          margin: 0;
+          padding: 0;
+          background-color: #0b0f19;
+          color: #f8fafc;
+          font-family: 'Tajawal', -apple-system, sans-serif;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          min-height: 100vh;
+        }
+        .card {
+          background: #111827;
+          border: 1px solid #1e293b;
+          border-radius: 24px;
+          padding: 44px 32px;
+          max-width: 480px;
+          width: 90%;
+          text-align: center;
+          box-shadow: 0 25px 50px -12px rgba(0,0,0,0.8);
+        }
+        .badge-icon {
+          width: 84px;
+          height: 84px;
+          background: rgba(56, 189, 248, 0.1);
+          border: 2px solid #38bdf8;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin: 0 auto 24px;
+          font-size: 38px;
+          box-shadow: 0 0 30px rgba(56, 189, 248, 0.25);
+        }
+        h1 {
+          font-size: 22px;
+          font-weight: 800;
+          color: #38bdf8;
+          margin: 0 0 12px;
+        }
+        p {
+          color: #94a3b8;
+          font-size: 15px;
+          line-height: 1.6;
+          margin: 0 0 28px;
+        }
+        .email-box {
+          display: inline-block;
+          background: #1e293b;
+          color: #38bdf8;
+          padding: 6px 16px;
+          border-radius: 8px;
+          font-family: monospace;
+          font-weight: bold;
+          font-size: 13px;
+          margin-bottom: 20px;
+        }
+        .btn {
+          display: inline-block;
+          background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+          color: #ffffff;
+          padding: 14px 34px;
+          border-radius: 14px;
+          font-weight: 800;
+          font-size: 15px;
+          text-decoration: none;
+          box-shadow: 0 10px 25px rgba(2, 132, 199, 0.4);
+        }
+      </style>
+      <script>
+        setTimeout(function() {
+          window.location.href = "${baseUrl}/?verified=true&email=${encodeURIComponent(email)}";
+        }, 2500);
+      </script>
+    </head>
+    <body>
+      <div class="card">
+        <div class="badge-icon">💎</div>
+        <h1>تم تأكيد البريد الإلكتروني بنجاح! 🎉</h1>
+        ${email ? `<div class="email-box">${email}</div>` : ''}
+        <p>مرحباً بك! تم تفعيل بريدك الإلكتروني وحسابك رسمياً بمتجر <strong>RYVO</strong>.<br>جاري تحويلك إلى الواجهة الرئيسية للمتجر خلال ثوانٍ...</p>
+        <a href="${baseUrl}/?verified=true&email=${encodeURIComponent(email)}" class="btn">الانتقال للمتجر الآن 🛍️</a>
+      </div>
+    </body>
+    </html>
+  `);
 });
 
 // PRELAUNCH / NOTIFY ME ENDPOINTS

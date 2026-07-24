@@ -534,6 +534,31 @@ export default function App() {
     setToastMessage(msg);
   };
 
+  // Auto-detect email verification tokens or success redirects in URL query params
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const verified = urlParams.get('verified');
+    const token = urlParams.get('token');
+    const email = urlParams.get('email');
+
+    if (verified === 'true') {
+      triggerToast(language === 'ar' ? 'تم تأكيد وتفعيل بريدك الإلكتروني بنجاح! 🎉' : 'Your email has been verified successfully! 🎉');
+      window.history.replaceState({}, document.title, window.location.pathname);
+    } else if (token && email) {
+      fetch(`/api/auth/confirm-email?token=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.success) {
+            triggerToast(language === 'ar' ? 'تم تأكيد وتفعيل بريدك الإلكتروني بنجاح! 🎉' : 'Your email has been verified successfully! 🎉');
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          window.history.replaceState({}, document.title, window.location.pathname);
+        });
+    }
+  }, [language]);
+
   // Commercial Integrations (Stripe, Apple Pay, Aramex, SMSA, COD) state
   const [integrations, setIntegrations] = useState<{
     stripeEnabled: boolean;

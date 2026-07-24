@@ -28,6 +28,8 @@ import {
   setLogLevel as clientSetLogLevel,
   terminate as clientTerminate
 } from "firebase/firestore";
+import { sendRealEmail, fetchEmailLogs, buildHtmlEmailTemplate } from "./server/services/emailService.js";
+
 
 // Suppress internal Firebase Client Firestore SDK debug and error logs to ensure clean logs
 try {
@@ -878,6 +880,25 @@ interface GlobalSettings {
     ctaTextEn?: string;
     ctaTextFr?: string;
   };
+  storeSettings?: {
+    storeMode: 'open' | 'pre_launch';
+    preLaunchMessageAr: string;
+    preLaunchMessageEn: string;
+    preLaunchMessageFr?: string;
+    launchDate: string;
+    showCountdown: boolean;
+    showTopBanner: boolean;
+    showNotifyMe: boolean;
+  };
+  emailConfig?: {
+    senderEmail: string;
+    senderName: string;
+    smtpHost?: string;
+    smtpPort?: number;
+    smtpSecure?: boolean;
+    smtpUser?: string;
+    smtpPass?: string;
+  };
 }
 
 const defaultSettings: GlobalSettings = {
@@ -933,6 +954,25 @@ const defaultSettings: GlobalSettings = {
     ctaTextEn: "Checkout & Save Now 🛍️",
     ctaTextFr: "Achetez et économisez 🛍️"
   },
+  storeSettings: {
+    storeMode: 'open',
+    preLaunchMessageAr: '🚀 ترقبوا افتتاح متجر RYVO قريباً - نجهز لكم تجربة شراء استثنائية!',
+    preLaunchMessageEn: '🚀 Stay tuned for the official launch of RYVO Store coming soon!',
+    preLaunchMessageFr: '🚀 Restez à l’écoute pour le lancement officiel du magasin RYVO !',
+    launchDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+    showCountdown: true,
+    showTopBanner: true,
+    showNotifyMe: true
+  },
+  emailConfig: {
+    senderEmail: process.env.SENDER_EMAIL || "support@ryvo.shop",
+    senderName: process.env.SENDER_NAME || "متجر RYVO الرسمي",
+    smtpHost: process.env.SMTP_HOST || "",
+    smtpPort: Number(process.env.SMTP_PORT || 587),
+    smtpSecure: process.env.SMTP_SECURE === "true",
+    smtpUser: process.env.SMTP_USER || "",
+    smtpPass: process.env.SMTP_PASS || ""
+  }
 };
 
 // Helper to read settings with in-memory cache
@@ -940,13 +980,20 @@ let cachedSettings: GlobalSettings | null = null;
 
 function getSettings(): GlobalSettings {
   if (cachedSettings) {
+    // Ensure nested objects are initialized
+    if (!cachedSettings.storeSettings) cachedSettings.storeSettings = defaultSettings.storeSettings;
+    if (!cachedSettings.emailConfig) cachedSettings.emailConfig = defaultSettings.emailConfig;
     return cachedSettings;
   }
   if (fs.existsSync(SETTINGS_FILE_PATH)) {
     try {
       const content = fs.readFileSync(SETTINGS_FILE_PATH, "utf8");
       cachedSettings = JSON.parse(content);
-      return cachedSettings;
+      if (cachedSettings) {
+        if (!cachedSettings.storeSettings) cachedSettings.storeSettings = defaultSettings.storeSettings;
+        if (!cachedSettings.emailConfig) cachedSettings.emailConfig = defaultSettings.emailConfig;
+      }
+      return cachedSettings || defaultSettings;
     } catch (e) {
       console.error("Error reading global settings file, using default:", e);
     }
@@ -1278,7 +1325,10 @@ app.post("/api/global-settings", requireAdmin, async (req, res) => {
       customAdmins: Array.isArray(newSettings.customAdmins) ? newSettings.customAdmins : current.customAdmins,
       integrations: newSettings.integrations !== undefined ? newSettings.integrations : current.integrations,
       welcomeCoupon: newSettings.welcomeCoupon !== undefined ? newSettings.welcomeCoupon : current.welcomeCoupon,
+      storeSettings: newSettings.storeSettings !== undefined ? newSettings.storeSettings : current.storeSettings,
+      emailConfig: newSettings.emailConfig !== undefined ? newSettings.emailConfig : current.emailConfig,
     };
+
 
     // Sync customAdmins with the users collection in Firestore
     if (db && Array.isArray(newSettings.customAdmins)) {
@@ -1843,6 +1893,31 @@ app.post("/api/orders", async (req, res) => {
     }
 
     await setDoc(doc(db, "orders", o.id), o);
+
+    // Send real email confirmation to customer
+    if (o.user_email) {
+      sendRealEmail({
+        to: o.user_email,
+        subject: `تأكيد استلام الطلب #${o.id} - متجر RYVO`,
+        html: buildHtmlEmailTemplate(
+          `تأكيد استلام الطلب #${o.id}`,
+          `أهلاً بك ${o.customer_name || 'عزيزي العميل'}!`,
+          `<p>شكراً لشرائك من متجر RYVO الرسمي. تم استلام طلبك بنجاح وهو الآن قيد المراجعة والمعالجة.</p>
+           <div style="background:#f8fafc; padding:16px; border-radius:12px; border:1px solid #e2e8f0; margin:16px 0;">
+             <p style="margin:4px 0;"><strong>رقم الطلب:</strong> #${o.id}</p>
+             <p style="margin:4px 0;"><strong>الإجمالي:</strong> ${o.total} ر.س</p>
+             <p style="margin:4px 0;"><strong>طريقة الدفع:</strong> ${o.payment_method === 'cod' ? 'الدفع عند الاستلام' : o.payment_method}</p>
+             <p style="margin:4px 0;"><strong>عنوان التوصيل:</strong> ${o.address || ''} (${o.phone || ''})</p>
+           </div>`,
+          `متابعة حالة الطلب`,
+          `https://ryvo.shop/account/orders`
+        ),
+        triggerEvent: 'order_confirmation',
+        db,
+        getSettings
+      }).catch(err => console.error("Email send error on order creation:", err));
+    }
+
     res.json({ success: true, order: o });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -1871,7 +1946,40 @@ app.post("/api/orders/update-status", async (req, res) => {
       updatePayload.cart = cart;
     }
     await updateDoc(docRef, updatePayload);
+
+    // Send real email notification on order status change
+    if (o.user_email) {
+      const statusNamesAr: Record<string, string> = {
+        pending: 'قيد الانتظار',
+        processing: 'قيد المعالجة والتجهيز',
+        shipped: 'تم الشحن وتسليم الشحنة لشركة النقل 🚚',
+        delivered: 'تم التوصيل بنجاح 🎁',
+        cancelled: 'تم إلغاء الطلب ❌'
+      };
+      const statusAr = statusNamesAr[status] || status;
+      let triggerEvt: any = 'order_status_update';
+      if (status === 'shipped') triggerEvt = 'order_shipping';
+      else if (status === 'cancelled') triggerEvt = 'order_cancellation';
+
+      let bodyHtml = `<p>يسعدنا إفادتك بأنه تم تغيير حالة طلبك رقم <strong>#${id}</strong> إلى: <span style="color:#0284c7; font-weight:800;">${statusAr}</span>.</p>`;
+      if (tracking_number) {
+        bodyHtml += `<div style="background:#f0f9ff; padding:16px; border-radius:12px; border:1px solid #bae6fd; margin:16px 0;">
+          <p style="margin:0; font-weight:700; color:#0369a1;">📦 رقم التتبع الخاص بالشحنة: <span style="font-family:monospace; font-size:18px;">${tracking_number}</span></p>
+        </div>`;
+      }
+
+      sendRealEmail({
+        to: o.user_email,
+        subject: `تحديث حالة الطلب #${id} (${statusAr}) - متجر RYVO`,
+        html: buildHtmlEmailTemplate(`تحديث حالة الطلب #${id}`, `أهلاً بك ${o.customer_name || 'عزيزي العميل'}!`, bodyHtml, `عرض تفاصيل الطلب`, `https://ryvo.shop/account/orders`),
+        triggerEvent: triggerEvt,
+        db,
+        getSettings
+      }).catch(err => console.error("Email send error on status update:", err));
+    }
+
     res.json({ success: true });
+
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
@@ -2183,12 +2291,252 @@ app.post("/api/auth/register", async (req, res) => {
       wallet_history: []
     };
     await setDoc(docRef, newUser);
+
+    // Trigger real welcome/registration email
+    sendRealEmail({
+      to: email.toLowerCase(),
+      subject: `أهلاً بك في متجر RYVO الرسمي 🎉`,
+      html: buildHtmlEmailTemplate(
+        `تم إنشاء حسابك بنجاح!`,
+        `مرحباً ${name}!`,
+        `<p>يسعدنا انضمامك إلى العائلة الرسمية لمتجر RYVO. تم تعبئة حسابك بـ <strong>100 نقطة ولاء مجانية</strong> كهدية ترحيبية فورية!</p>
+         <p>يمكنك الآن الاستمتاع بتجربة تسوق فريدة وشراء أفخم المنتجات مع حماية وضمان متكامل.</p>`,
+        `تصفح المنتجات الآن`,
+        `https://ryvo.shop`
+      ),
+      triggerEvent: 'account_creation',
+      db,
+      getSettings
+    }).catch(err => console.error("Email send error on registration:", err));
+
     const { password: _, ...safeUser } = newUser;
     res.json({ success: true, user: safeUser });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
 });
+
+// PASSWORD RECOVERY / FORGOT PASSWORD ENDPOINT
+app.post("/api/auth/forgot-password", async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: "البريد الإلكتروني مطلوب" });
+
+    const cleanEmail = email.toLowerCase().trim();
+    const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
+
+    const result = await sendRealEmail({
+      to: cleanEmail,
+      subject: `رمز استعادة كلمة المرور - متجر RYVO 🔐`,
+      html: buildHtmlEmailTemplate(
+        `استعادة كلمة المرور`,
+        `عزيزي العميل،`,
+        `<p>لقد استلمنا طلباً لإعادة ضبط كلمة المرور المرتبطة بحسابك (${cleanEmail}).</p>
+         <p>يرجى استخدام رمز الأمان المؤقت التالي لاستكمال إعادة الضبط:</p>
+         <div style="background:#f0f9ff; padding:18px; border-radius:12px; text-align:center; font-size:26px; font-weight:900; letter-spacing:6px; color:#0284c7; border:1px border #bae6fd; margin:18px 0;">
+           ${resetCode}
+         </div>
+         <p>إذا لم تكن أنت من أرسل هذا الطلب، فيمكنك تجاهل هذه الرسالة بأمان.</p>`,
+        `زيارة الموقع`,
+        `https://ryvo.shop`
+      ),
+      triggerEvent: 'password_reset',
+      db,
+      getSettings
+    });
+
+    res.json({ success: true, message: "تم إرسال رمز استعادة كلمة المرور إلى بريدك الإلكتروني الحقيقي بنجاح!", resetCode, emailLog: result.log });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// VERIFY EMAIL ENDPOINT
+app.post("/api/auth/verify-email", async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: "البريد الإلكتروني مطلوب" });
+
+    const cleanEmail = email.toLowerCase().trim();
+    const verifyCode = Math.floor(100000 + Math.random() * 900000).toString();
+
+    const result = await sendRealEmail({
+      to: cleanEmail,
+      subject: `رمز تأكيد البريد الإلكتروني - متجر RYVO ✉️`,
+      html: buildHtmlEmailTemplate(
+        `تأكيد البريد الإلكتروني`,
+        `عزيزي المستخدم،`,
+        `<p>يرجى استخدام كود التأكيد التالي لإكمال تفعيل بريدك الإلكتروني وحسابك:</p>
+         <div style="background:#f0f9ff; padding:18px; border-radius:12px; text-align:center; font-size:26px; font-weight:900; letter-spacing:6px; color:#0284c7; margin:18px 0;">
+           ${verifyCode}
+         </div>`,
+        `الذهاب للمتجر`,
+        `https://ryvo.shop`
+      ),
+      triggerEvent: 'email_verification',
+      db,
+      getSettings
+    });
+
+    res.json({ success: true, message: "تم إرسال رمز تأكيد البريد الإلكتروني بنجاح!", verifyCode, emailLog: result.log });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PRELAUNCH / NOTIFY ME ENDPOINTS
+app.post("/api/prelaunch/subscribe", async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email || !email.includes("@")) {
+      return res.status(400).json({ error: "يرجى كتابة بريد إلكتروني صحيح" });
+    }
+
+    const cleanEmail = email.toLowerCase().trim();
+    const subId = "sub_" + cleanEmail.replace(/[^a-z0-9]/g, "_");
+
+    const subscriberData = {
+      id: subId,
+      email: cleanEmail,
+      createdAt: new Date().toISOString(),
+      status: "pending"
+    };
+
+    if (db) {
+      try {
+        await db.collection("prelaunch_subscribers").doc(subId).set(subscriberData, { merge: true });
+      } catch (fErr: any) {
+        console.warn("⚠️ Firestore prelaunch subscription save warning:", fErr.message);
+      }
+    }
+
+    const result = await sendRealEmail({
+      to: cleanEmail,
+      subject: `تم تسجيلك بنجاح في قائمة انتظار افتتاح متجر RYVO! 🔔`,
+      html: buildHtmlEmailTemplate(
+        `أهلاً بك في قائمة الانتظار!`,
+        `عزيزي الزائر،`,
+        `<p>شكراً لاهتمامك بمتجر RYVO! تم تسجيل بريدك الإلكتروني (${cleanEmail}) بنجاح.</p>
+         <p>سنكون أول من يحيطك علماً فور الانطلاق الرسمي مع هدايا حصرية وعروض لا تفوت!</p>`,
+        `تصفح المتجر`,
+        `https://ryvo.shop`
+      ),
+      triggerEvent: 'prelaunch_notify',
+      db,
+      getSettings
+    });
+
+    res.json({ success: true, message: "تم تسجيل بريدك الإلكتروني بنجاح! سنقوم بإشعاراتك فور الافتتاح الرسمي 🎉", emailLog: result.log });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/prelaunch/subscribers", requireAdmin, async (req, res) => {
+  try {
+    let subscribers: any[] = [];
+    if (db) {
+      try {
+        const snap = await db.collection("prelaunch_subscribers").get();
+        if (snap && snap.docs) {
+          subscribers = snap.docs.map((d: any) => d.data());
+        }
+      } catch (err: any) {
+        console.warn("⚠️ Fetching subscribers failed:", err.message);
+      }
+    }
+    res.json({ success: true, subscribers });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/prelaunch/broadcast", requireAdmin, async (req, res) => {
+  try {
+    const { customSubject, customMessage } = req.body;
+    let subscribers: any[] = [];
+
+    if (db) {
+      const snap = await db.collection("prelaunch_subscribers").get();
+      if (snap && snap.docs) {
+        subscribers = snap.docs.map((d: any) => d.data());
+      }
+    }
+
+    if (subscribers.length === 0) {
+      return res.status(400).json({ error: "لا يوجد مشتركين مسجلين في قائمة الانتظار حتى الآن!" });
+    }
+
+    const subject = customSubject || "🎉 تم افتتاح متجر RYVO رسمياً! ابدأ التسوق الآن";
+    const bodyContent = customMessage || `<p>يسعدنا جداً إعلان الانطلاق الرسمي لمتجر RYVO!</p>
+      <p>يمكنك الآن تصفح مئات المنتجات الفاخرة والاستفادة من عروض الافتتاح الخاطفة.</p>`;
+
+    let sentCount = 0;
+    for (const sub of subscribers) {
+      if (sub.email) {
+        await sendRealEmail({
+          to: sub.email,
+          subject,
+          html: buildHtmlEmailTemplate("🎉 افتتحنا رسمياً!", "أهلاً بك!", bodyContent, "ابدأ التسوق الآن 🛍️", "https://ryvo.shop"),
+          triggerEvent: 'prelaunch_broadcast',
+          db,
+          getSettings
+        });
+        sentCount++;
+
+        if (db) {
+          try {
+            await db.collection("prelaunch_subscribers").doc(sub.id).update({ status: 'notified', notifiedAt: new Date().toISOString() });
+          } catch (_) {}
+        }
+      }
+    }
+
+    res.json({ success: true, message: `تم إرسال بريد الافتتاح الجماعي بنجاح إلى ${sentCount} مشترك!`, sentCount });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// TEST EMAIL DISPATCH
+app.post("/api/email/test", requireAdmin, async (req, res) => {
+  try {
+    const { testEmail } = req.body;
+    if (!testEmail || !testEmail.includes("@")) {
+      return res.status(400).json({ error: "البريد الإلكتروني لاختبار الإرسال مطلوب" });
+    }
+
+    const result = await sendRealEmail({
+      to: testEmail.toLowerCase().trim(),
+      subject: "🧪 رسالة اختبار إعدادات البريد الإلكتروني - متجر RYVO",
+      html: buildHtmlEmailTemplate(
+        "اختبار خادم البريد الإلكتروني",
+        "مرحباً بك عزيزي الأدمن!",
+        "<p>تهانينا! هذه الرسالة تأكيد أن نظام إرسال البريد الإلكتروني الحقيقي يعمل بشكل ممتاز وسليم تماماً على متجر RYVO.</p>",
+        "الانتقال للوحة التحكم",
+        "https://ryvo.shop/admin"
+      ),
+      triggerEvent: 'test_email',
+      db,
+      getSettings
+    });
+
+    res.json({ success: result.success, message: result.success ? "تم إرسال البريد الاختباري بنجاح!" : "فشل إرسال البريد الاختباري: " + result.log.errorMessage, log: result.log });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// EMAIL LOGS FETCH
+app.get("/api/email/logs", requireAdmin, async (req, res) => {
+  try {
+    const logs = await fetchEmailLogs(db);
+    res.json({ success: true, logs });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 // 4. DROPSHIPPING SUPPLIERS
 

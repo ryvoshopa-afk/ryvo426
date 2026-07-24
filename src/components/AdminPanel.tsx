@@ -4,7 +4,8 @@ import { Activity, Laptop, Tablet, MapPin, FileText, Megaphone, Video, Edit, Sli
 import CJProductImporter from './CJProductImporter';
 import AiMarketingStudio from './AiMarketingStudio';
 import WelcomeCouponSettings from './WelcomeCouponSettings';
-import { Language, Order, Product, User, Review, WheelSettings, WheelSegment, Supplier } from '../types';
+import StoreSettingsPanel from './StoreSettingsPanel';
+import { Language, Order, Product, User, Review, WheelSettings, WheelSegment, Supplier, GlobalSettings } from '../types';
 import { TRANSLATIONS } from '../constants/translations';
 import socket from '../utils/socket';
 import { smartFetch } from '../utils/smartFetch';
@@ -290,7 +291,40 @@ export default function AdminPanel({
     | 'suppliers'
     | 'active_sessions'
     | 'audit_logs'
+    | 'store_settings'
   >('products');
+
+  const [globalSettings, setGlobalSettings] = useState<GlobalSettings | null>(null);
+
+  const fetchGlobalSettings = async () => {
+    try {
+      const res = await fetch('/api/global-settings');
+      const data = await res.json();
+      if (data) setGlobalSettings(data);
+    } catch (err) {
+      console.error('Failed fetching global settings:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchGlobalSettings();
+  }, []);
+
+  const handleSaveGlobalSettings = async (newSettings: GlobalSettings) => {
+    const res = await fetch('/api/global-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newSettings)
+    });
+    const data = await res.json();
+    if (data.success && data.settings) {
+      setGlobalSettings(data.settings);
+      if (onUpdatePurchasingDisabled && data.settings.storeSettings) {
+        onUpdatePurchasingDisabled(data.settings.storeSettings.storeMode === 'pre_launch');
+      }
+    }
+  };
+
 
   // Sessions & Audit Logs state and fetchers
   const [sessionsList, setSessionsList] = useState<any[]>([]);
@@ -3368,7 +3402,22 @@ export default function AdminPanel({
 
             {isPanelAllowed('storeCustomization') && (
               <button
+                onClick={() => { setAdminTab('store_settings'); setShowMenuDropdown(false); }}
+                className={`p-3 rounded-xl border flex flex-col items-center justify-center gap-2 text-center transition-all cursor-pointer ${
+                  adminTab === 'store_settings'
+                    ? 'bg-rose-500/15 border-rose-500/50 text-rose-500 font-black'
+                    : 'bg-slate-50 dark:bg-slate-800/20 border-slate-100 dark:border-slate-800/80 text-slate-600 dark:text-slate-300 hover:bg-slate-100'
+                }`}
+              >
+                <Settings className="w-5 h-5 text-amber-500 animate-pulse" />
+                <span className="text-[11px] font-bold">{isRtl ? 'إعدادات المتجر والبريد ⚙️✉️' : 'Store & Email ⚙️✉️'}</span>
+              </button>
+            )}
+
+            {isPanelAllowed('storeCustomization') && (
+              <button
                 onClick={() => { setAdminTab('profits'); setShowMenuDropdown(false); }}
+
                 className={`p-3 rounded-xl border flex flex-col items-center justify-center gap-2 text-center transition-all cursor-pointer ${
                   adminTab === 'profits'
                     ? 'bg-rose-500/15 border-rose-500/50 text-rose-500 font-black'
@@ -8468,8 +8517,8 @@ export default function AdminPanel({
                           {isRtl ? 'لا يوجد رسائل في هذه الجلسة حالياً.' : 'No messages found in this session.'}
                         </div>
                       ) : (
-                        currentChatSessionMessages.map((msg: any) => (
-                          <div key={msg.id} className={`flex flex-col max-w-[85%] ${msg.sender === 'support' ? 'ms-auto items-end' : 'me-auto items-start'}`}>
+                        currentChatSessionMessages.map((msg: any, mIdx: number) => (
+                          <div key={msg.id || `chat-msg-${mIdx}-${msg.timestamp || Date.now()}`} className={`flex flex-col max-w-[85%] ${msg.sender === 'support' ? 'ms-auto items-end' : 'me-auto items-start'}`}>
                             <div className={`p-3 rounded-2xl text-[11px] font-medium leading-relaxed ${
                               msg.isInternal
                                 ? 'bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-200'
@@ -8959,8 +9008,8 @@ export default function AdminPanel({
                       className="w-full text-xs p-3 rounded-xl border bg-white dark:bg-[#0A0C10] border-slate-200 dark:border-slate-200 text-slate-850 dark:text-white outline-none"
                     >
                       <option value="">{isRtl ? '-- حدد بريد العميل --' : '-- Choose customer account --'}</option>
-                      {registeredUsers.filter(u => u.role !== 'admin').map(u => (
-                        <option key={u.email} value={u.email}>{u.name || 'سائل مجهول'} ({u.email})</option>
+                      {registeredUsers.filter(u => u.role !== 'admin').map((u, idx) => (
+                        <option key={u.email || u.id || `u-opt-${idx}`} value={u.email}>{u.name || 'سائل مجهول'} ({u.email})</option>
                       ))}
                     </select>
                   </div>
@@ -9008,10 +9057,10 @@ export default function AdminPanel({
                   <div className="space-y-1">
                     <label className="block text-[10px] uppercase font-black tracking-widest text-slate-400">{isRtl ? 'تحديد المستلمين بالنقرة:' : 'Recipients Checklist Selection:'}</label>
                     <div className="max-h-24 overflow-y-auto border border-slate-205 dark:border-slate-200 bg-white dark:bg-[#0A0C10] p-2.5 rounded-xl space-y-1.5">
-                      {registeredUsers.filter(u => u.role !== 'admin').map(u => {
+                      {registeredUsers.filter(u => u.role !== 'admin').map((u, idx) => {
                         const isChecked = selectedGroupEmails.includes(u.email);
                         return (
-                          <label key={u.email} className="flex items-center gap-2 cursor-pointer text-[10.5px]">
+                          <label key={u.email || u.id || `u-chk-${idx}`} className="flex items-center gap-2 cursor-pointer text-[10.5px]">
                             <input
                               type="checkbox"
                               checked={isChecked}
@@ -9107,10 +9156,10 @@ export default function AdminPanel({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
-                    {registeredUsers.filter(u => u.role !== 'admin').map((u) => {
+                    {registeredUsers.filter(u => u.role !== 'admin').map((u, uIdx) => {
                       const hasAddress = u.city || u.district || u.street;
                       return (
-                        <tr key={u.email} className="admin-customer-row hover:bg-slate-50/50 dark:hover:bg-slate-900/30">
+                        <tr key={u.id || u.email || `cust-row-${uIdx}`} className="admin-customer-row hover:bg-slate-50/50 dark:hover:bg-slate-900/30">
                           <td className="p-3 font-semibold text-slate-850 dark:text-white font-sans">{u.name || (isRtl ? 'عميل مجهول' : 'Anonymous Client')}</td>
                           <td className="p-3 font-mono text-[11px] text-slate-500 dark:text-slate-400 select-all">{u.email}</td>
                           <td className="p-3 font-semibold text-slate-700 dark:text-slate-300 font-sans">
@@ -9318,8 +9367,8 @@ export default function AdminPanel({
                             </td>
                           </tr>
                         ) : (
-                          subscribers.map((sub: any) => (
-                            <tr key={sub.email} className="admin-subscriber-row hover:bg-slate-50/50 dark:hover:bg-slate-900/30">
+                          subscribers.map((sub: any, subIdx: number) => (
+                            <tr key={sub.id || sub.email || `sub-row-${subIdx}`} className="admin-subscriber-row hover:bg-slate-50/50 dark:hover:bg-slate-900/30">
                               <td className="p-3 font-mono font-medium text-slate-850 dark:text-white select-all">{sub.email}</td>
                               <td className="p-3 text-slate-500 dark:text-slate-400 font-sans">
                                 {new Date(sub.subscribedAt).toLocaleDateString(isRtl ? 'ar-SA' : 'en-US')} - {new Date(sub.subscribedAt).toLocaleTimeString(isRtl ? 'ar-SA' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
@@ -9418,7 +9467,7 @@ export default function AdminPanel({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
-                      {filtered.map((s) => {
+                      {filtered.map((s, sIdx) => {
                         const isCurrentUserSession = s.id === localStorage.getItem('ryvo_session_id');
                         const lastActiveTime = s.lastActive ? new Date(s.lastActive).getTime() : (s.timestamp ? new Date(s.timestamp).getTime() : 0);
                         const isOnline = lastActiveTime && (Date.now() - lastActiveTime) < 5 * 60 * 1000;
@@ -9454,7 +9503,7 @@ export default function AdminPanel({
                         };
 
                         return (
-                          <tr key={s.id} className="hover:bg-slate-50/50 dark:hover:bg-[#101524]/30 transition-all">
+                          <tr key={s.id || `sess-row-${sIdx}-${s.email}`} className="hover:bg-slate-50/50 dark:hover:bg-[#101524]/30 transition-all">
                             {/* User details & Role Badge */}
                             <td className="p-4 text-right">
                               <div className="flex items-center gap-2.5 justify-start rtl:flex-row-reverse">
@@ -9690,7 +9739,7 @@ export default function AdminPanel({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
-                      {filtered.map((log) => {
+                      {filtered.map((log, logIdx) => {
                         let badgeColor = "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300";
                         if (log.action.includes('DELETE')) badgeColor = "bg-rose-500/10 text-rose-500 border border-rose-500/20";
                         else if (log.action.includes('CREATE')) badgeColor = "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20";
@@ -9699,7 +9748,7 @@ export default function AdminPanel({
                         else if (log.action === 'LOGOUT') badgeColor = "bg-slate-500/15 text-slate-500 border border-slate-500/20";
 
                         return (
-                          <tr key={log.id} className="hover:bg-slate-50/50 dark:hover:bg-[#101524]/30 transition-all">
+                          <tr key={log.id || `audit-log-${logIdx}-${log.timestamp}`} className="hover:bg-slate-50/50 dark:hover:bg-[#101524]/30 transition-all">
                             {/* User details */}
                             <td className="p-4 text-right">
                               <div className="flex items-center gap-2 justify-start rtl:flex-row-reverse">
@@ -9919,8 +9968,8 @@ export default function AdminPanel({
                   </div>
 
                   {/* Custom sub-admins */}
-                  {customAdmins.map((adm: any) => (
-                    <div key={adm.email} className="p-4 bg-slate-50 dark:bg-[#11141D] border border-slate-150 dark:border-slate-800 rounded-2xl space-y-2 relative">
+                  {customAdmins.map((adm: any, admIdx: number) => (
+                    <div key={adm.id || adm.email || `custom-adm-${admIdx}`} className="p-4 bg-slate-50 dark:bg-[#11141D] border border-slate-150 dark:border-slate-800 rounded-2xl space-y-2 relative">
                       <div className="flex justify-between items-start">
                         <div>
                           <strong className="text-xs font-black text-slate-900 dark:text-white block">{adm.name}</strong>
@@ -10510,13 +10559,13 @@ export default function AdminPanel({
                       </div>
                     ) : (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {adsList.map((ad) => {
+                        {adsList.map((ad, adIdx) => {
                           const now = new Date();
                           const isDateValid = (!ad.startDate || new Date(ad.startDate) <= now) && (!ad.endDate || new Date(ad.endDate) >= now);
                           const isCurrentlyActive = ad.active && isDateValid;
 
                           return (
-                            <div key={ad.id} className="p-4 bg-slate-50 dark:bg-[#11141D] border border-slate-150 dark:border-slate-800 rounded-2xl flex gap-4 relative">
+                            <div key={ad.id || `ad-${adIdx}-${ad.title}`} className="p-4 bg-slate-50 dark:bg-[#11141D] border border-slate-150 dark:border-slate-800 rounded-2xl flex gap-4 relative">
                               <div className="w-16 h-16 rounded-xl overflow-hidden bg-slate-200 dark:bg-slate-900 shrink-0 relative flex items-center justify-center">
                                 {ad.type === 'video' ? (
                                   <div className="text-center font-bold text-[8px] text-pink-500 flex flex-col items-center">
@@ -12796,8 +12845,35 @@ export default function AdminPanel({
         </div>
       )}
 
+      {/* PANEL STORE SETTINGS & EMAIL CONFIG */}
+      {adminTab === 'store_settings' && isPanelAllowed('storeCustomization') && (
+        <div className="bg-white dark:bg-[#131b2e] rounded-3xl p-6 sm:p-8 border border-slate-100 dark:border-slate-800 shadow-md animate-in zoom-in-95 duration-200">
+          <StoreSettingsPanel
+            settings={globalSettings || {
+              purchasingDisabled: false,
+              storeSettings: {
+                storeMode: 'open',
+                preLaunchMessageAr: '🚀 ترقبوا افتتاح متجر RYVO قريباً!',
+                preLaunchMessageEn: '🚀 Stay tuned for the official launch of RYVO Store coming soon!',
+                launchDate: new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString(),
+                showCountdown: true,
+                showTopBanner: true,
+                showNotifyMe: true
+              },
+              emailConfig: {
+                senderEmail: 'support@ryvo.shop',
+                senderName: 'متجر RYVO الرسمي'
+              }
+            }}
+            onSaveSettings={handleSaveGlobalSettings}
+            isRtl={isRtl}
+          />
+        </div>
+      )}
+
       {/* PANEL O: SUPPLIERS & DROPSHIPPING WORKSPACE */}
       {adminTab === 'suppliers' && isPanelAllowed('storeCustomization') && (
+
         <div className="bg-white dark:bg-[#131b2e] rounded-3xl p-6 sm:p-8 border border-slate-100 dark:border-slate-800 shadow-md text-left animate-in zoom-in-95 duration-200 space-y-8">
           
           {/* Header Title and description */}
@@ -13944,8 +14020,8 @@ export default function AdminPanel({
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium text-slate-800 dark:text-slate-200">
-                        {cjLogs.map((log: any) => (
-                          <tr key={log.id} className="hover:bg-slate-50/40 dark:hover:bg-slate-900/10">
+                        {cjLogs.map((log: any, cjIdx: number) => (
+                          <tr key={log.id || `cj-log-${cjIdx}-${log.timestamp}`} className="hover:bg-slate-50/40 dark:hover:bg-slate-900/10">
                             <td className="px-5 py-3.5 font-bold text-slate-900 dark:text-white flex items-center gap-1.5 text-left">
                               <span className={`w-2 h-2 rounded-full ${log.status === 'success' ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500 animate-bounce'}`} />
                               {log.action}

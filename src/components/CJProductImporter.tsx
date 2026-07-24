@@ -452,7 +452,7 @@ export default function CJProductImporter({ onAddProduct, currentLanguage, admin
         <div className="space-y-6">
           {/* Products Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {products.map((prod) => {
+            {products.map((prod, prodIdx) => {
               const imgUrl = prod.productImage || "https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=800&q=80";
               const rawPrice = prod.sellPrice || prod.productSellPrice || prod.price || '0';
               let lowestPriceUsd = 0;
@@ -469,7 +469,7 @@ export default function CJProductImporter({ onAddProduct, currentLanguage, admin
 
               return (
                 <div 
-                  key={prod.pid} 
+                  key={prod.pid || prod.id || `cj-prod-${prodIdx}`} 
                   className="bg-white dark:bg-[#111827] border border-slate-150 dark:border-slate-850 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-all flex flex-col justify-between group"
                 >
                   <div className="relative aspect-square overflow-hidden bg-slate-100">

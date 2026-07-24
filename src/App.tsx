@@ -1,5 +1,7 @@
 import { useState, useEffect, lazy, Suspense } from 'react';
-import { Product, Language, Theme, CartItem, Order, User, Review, WheelSettings, WheelSegment } from './types';
+import { Product, Language, Theme, CartItem, Order, User, Review, WheelSettings, WheelSegment, StoreSettings } from './types';
+import PrelaunchBanner from './components/PrelaunchBanner';
+import PrelaunchModal from './components/PrelaunchModal';
 import { INITIAL_PRODUCTS } from './constants/initialProducts';
 import { TRANSLATIONS } from './constants/translations';
 import { updateSEO, generateSitemapXML, generateRobotsTXT } from './utils/seo';
@@ -522,7 +524,10 @@ export default function App() {
 
   // Purchasing and Ordering controls
   const [purchasingDisabled, setPurchasingDisabled] = useState(false);
+  const [storeSettings, setStoreSettings] = useState<StoreSettings | undefined>(undefined);
+  const [showPrelaunchModal, setShowPrelaunchModal] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
   const [welcomeBarMinimized, setWelcomeBarMinimized] = useState(false);
   const [welcomeBarCopied, setWelcomeBarCopied] = useState(false);
   const triggerToast = (msg: string) => {
@@ -588,6 +593,13 @@ export default function App() {
           if (data.purchasingDisabled !== undefined) {
             setPurchasingDisabled(data.purchasingDisabled);
           }
+          if (data.storeSettings) {
+            setStoreSettings(data.storeSettings);
+            if (data.storeSettings.storeMode === 'pre_launch') {
+              setPurchasingDisabled(true);
+            }
+          }
+
           if (data.announcementTextAr !== undefined) {
             setAnnouncementTextAr(data.announcementTextAr);
             localStorage.setItem('ryvo_announcement_text_ar', data.announcementTextAr);
@@ -1143,11 +1155,12 @@ export default function App() {
   };
 
   const handleBuyNow = (product: Product, quantity: number, color?: string) => {
-    if (purchasingDisabled) {
-      triggerToast(language === 'ar' ? 'عذراً، لم يتم الافتتاح حتى الآن!' : 'Sorry, we are not open yet!');
+    if (purchasingDisabled || storeSettings?.storeMode === 'pre_launch') {
+      setShowPrelaunchModal(true);
       return;
     }
     if (!currentUser) {
+
       triggerToast(language === 'ar' ? 'يجب تسجيل الدخول أولاً لإتمام الشراء!' : 'You must log in first to purchase!');
       setIsAuthOpen(true);
       return;
@@ -1622,7 +1635,11 @@ export default function App() {
         theme === 'dark' ? 'bg-[#0A0C10] text-slate-100' : 'bg-slate-50 text-slate-800'
       }`}>
       
+      {/* Pre-Launch Top Announcement Banner */}
+      <PrelaunchBanner storeSettings={storeSettings} isRtl={isRtl} />
+
       {/* Top Warning Banner if user is on simulated credentials */}
+
       {currentUser && currentUser.role === 'admin' && (
         <div className="bg-gradient-to-r from-rose-500 to-amber-500 text-white py-2 text-center text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-1.5 px-4 shadow-sm">
           <ShieldCheck className="w-4 h-4 animate-bounce" />
@@ -2680,7 +2697,16 @@ export default function App() {
         </div>
       )}
 
+      {/* Pre-Launch Purchase Guard Modal */}
+      <PrelaunchModal
+        isOpen={showPrelaunchModal}
+        onClose={() => setShowPrelaunchModal(false)}
+        storeSettings={storeSettings}
+        isRtl={isRtl}
+      />
+
       </Suspense>
+
     </div>
     </ConfirmationProvider>
   );

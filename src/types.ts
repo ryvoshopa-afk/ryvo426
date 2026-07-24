@@ -260,6 +260,27 @@ export interface Supplier {
   totalSynced?: number;
 }
 
+export interface StoreSettings {
+  storeMode: 'open' | 'pre_launch';
+  preLaunchMessageAr: string;
+  preLaunchMessageEn: string;
+  preLaunchMessageFr?: string;
+  launchDate: string;
+  showCountdown: boolean;
+  showTopBanner: boolean;
+  showNotifyMe: boolean;
+}
+
+export interface EmailConfig {
+  senderEmail: string;
+  senderName: string;
+  smtpHost?: string;
+  smtpPort?: number;
+  smtpSecure?: boolean;
+  smtpUser?: string;
+  smtpPass?: string;
+}
+
 export interface GlobalSettings {
   brandColor: string;
   shopLogo: string;
@@ -323,6 +344,30 @@ export interface GlobalSettings {
     messageEn: string;
     messageFr: string;
   };
+  storeSettings?: StoreSettings;
+  emailConfig?: EmailConfig;
 }
+
+export interface EmailLog {
+  id: string;
+  to: string;
+  senderEmail: string;
+  senderName: string;
+  subject: string;
+  triggerEvent: string;
+  status: 'Sent' | 'Failed';
+  errorMessage?: string;
+  timestamp: string;
+  bodyPreview: string;
+}
+
+export interface PrelaunchSubscriber {
+  id: string;
+  email: string;
+  createdAt: string;
+  notifiedAt?: string;
+  status: 'pending' | 'notified';
+}
+
 
 

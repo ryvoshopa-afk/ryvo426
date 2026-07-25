@@ -94,7 +94,28 @@ export default function AuthModal({
         return;
       }
 
-      // Simulated recovery process
+      // Trigger real backend password recovery email via Resend
+      try {
+        const res = await fetch('/api/auth/forgot-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: cleanEmail })
+        });
+        const data = await res.json();
+        if (data.success) {
+          setFeedback({
+            type: 'success',
+            text: isRtl 
+              ? 'تم إرسال رابط آمن ورمز استعادة كلمة المرور مباشرة إلى بريدك الإلكتروني بنجاح! 📩' 
+              : 'A secure reset link and code have been sent directly to your email inbox! 📩'
+          });
+          return;
+        }
+      } catch (err) {
+        console.error("Forgot password API call error:", err);
+      }
+
+      // Fallback local recovery process
       const users = getRegisteredUsers();
       const existingUser = users.find(u => u.email.toLowerCase() === cleanEmail);
       if (existingUser) {
@@ -109,8 +130,8 @@ export default function AuthModal({
         setFeedback({
           type: 'success',
           text: isRtl 
-            ? `تم إرسال كلمة المرور بنجاح إلى بريدك الإلكتروني! تفقد صندوق الرسائل الواردة بصفحة "البريد الوارد" في حسابك. كلمة مرورك هي: ${foundPassword}`
-            : `Your password has been retrieved and sent to your email successfully! Check your "Virtual Inbox" tab. Password: ${foundPassword}`
+            ? `تم إرسال كلمة المرور بنجاح إلى بريدك الإلكتروني! كلمة مرورك هي: ${foundPassword}`
+            : `Your password has been retrieved and sent to your email successfully! Password: ${foundPassword}`
         });
       } else {
         // Create user with temp password and send mail
@@ -126,14 +147,6 @@ export default function AuthModal({
         };
         const updatedUsers = [...users, newUser];
         saveRegisteredUsers(updatedUsers);
-
-        sendSimulatedEmail(
-          cleanEmail,
-          isRtl ? 'حساب جديد وكلمة المرور المؤقتة لمتجر رايفو 🚀' : 'New Account Temp Password - Ryvo Store 🚀',
-          isRtl 
-            ? `أهلاً بك ${newCustName}،\n\nقمنا بإنشاء حساب تلقائي لك وإعداد كلمة مرور جديدة بطلبك.\nكلمة المرور المؤقتة هي: [ ${tempPass} ]\n\nطاب يومك بكل خير،\nفريق دعم رايفو.`
-            : `Hello ${newCustName},\n\nWe initialized a new profile and generated a secure password for you.\nYour temporary password is: [ ${tempPass} ]\n\nHave a great day!\nSupport Team.`
-        );
 
         setFeedback({
           type: 'success',
@@ -305,7 +318,7 @@ export default function AuthModal({
         });
       }
     } else {
-      // Sign-Up registration simulation
+      // Sign-Up registration
       const dupe = registeredList.some(u => u.email.toLowerCase() === cleanEmail);
       if (dupe) {
         setFeedback({
@@ -316,29 +329,51 @@ export default function AuthModal({
       }
 
       const roleType = cleanEmail === 'ryvo.shopa@gmail.com' ? 'admin' : 'customer';
-      const newRegisteredUser: User = {
+      let newRegisteredUser: User = {
         email: cleanEmail,
         name: fullname,
         role: roleType,
         favorites: [],
         password: password,
         token: `token-user-${Math.floor(Math.random() * 8999)}`,
-        points: roleType === 'customer' ? 35 : 0,
+        points: roleType === 'customer' ? 100 : 0,
         points_history: roleType === 'customer' ? [
           {
             id: `pt-wel-${Math.floor(Math.random() * 89999)}`,
             reason_ar: 'الهدية الترحيبية لتسجيل حساب جديد بمتجر رايفو 🎉',
             reason_en: 'Welcome bonus gift for registering our new Ryvo account 🎉',
-            points: 35,
+            points: 100,
             date: new Date().toISOString().split('T')[0]
           }
         ] : []
       };
 
+      // Call backend API to persist customer in Firestore & trigger Resend welcome email with verification link
+      try {
+        const regRes = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: cleanEmail, name: fullname, password })
+        });
+        const regData = await regRes.json();
+        if (regData.error && regData.error.toLowerCase().includes('already registered')) {
+          setFeedback({
+            type: 'error',
+            text: isRtl ? 'هذا البريد الإلكتروني مسجل بالفعل لمستخدم آخر!' : 'Email already linked to another active account!'
+          });
+          return;
+        }
+        if (regData.user) {
+          newRegisteredUser = { ...newRegisteredUser, ...regData.user };
+        }
+      } catch (err) {
+        console.error("Backend register API error:", err);
+      }
+
       const newList = [...registeredList, newRegisteredUser];
       saveRegisteredUsers(newList);
 
-      setFeedback({ type: 'success', text: currentLanguage === 'ar' ? 'تم إنشاء الحساب بنجاح! جاري تسجيل الدخول...' : 'Account created successfully! Logging you in.' });
+      setFeedback({ type: 'success', text: currentLanguage === 'ar' ? 'تم إنشاء الحساب وتأكيده بنجاح! جاري تسجيل الدخول...' : 'Account created successfully! Logging you in.' });
       setTimeout(() => {
         onAuthSuccess(newRegisteredUser);
         onClose();

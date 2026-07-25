@@ -2274,7 +2274,7 @@ app.post("/api/auth/register", async (req, res) => {
 
     // Save verification record
     try {
-      await db.collection("email_verifications").doc(cleanEmail).set({
+      await setDoc(doc(db, "email_verifications", cleanEmail), {
         email: cleanEmail,
         token: verifyToken,
         createdAt: new Date().toISOString(),
@@ -2321,7 +2321,7 @@ app.post("/api/auth/forgot-password", async (req, res) => {
 
     if (db) {
       try {
-        await db.collection("password_resets").doc(cleanEmail).set({
+        await setDoc(doc(db, "password_resets", cleanEmail), {
           email: cleanEmail,
           code: resetCode,
           token: resetToken,
@@ -2371,7 +2371,7 @@ app.post("/api/auth/verify-email", async (req, res) => {
 
     if (db) {
       try {
-        await db.collection("email_verifications").doc(cleanEmail).set({
+        await setDoc(doc(db, "email_verifications", cleanEmail), {
           email: cleanEmail,
           code: verifyCode,
           token: verifyToken,
@@ -2430,7 +2430,7 @@ app.post(emailConfirmRoutes, async (req, res) => {
     } catch (_) {}
 
     try {
-      await db.collection("email_verifications").doc(email).set({
+      await setDoc(doc(db, "email_verifications", email), {
         email,
         token,
         status: "verified",
@@ -2459,7 +2459,7 @@ app.get(emailConfirmRoutes, async (req, res) => {
     } catch (_) {}
 
     try {
-      await db.collection("email_verifications").doc(email).set({
+      await setDoc(doc(db, "email_verifications", email), {
         email,
         status: "verified",
         verifiedAt: new Date().toISOString()

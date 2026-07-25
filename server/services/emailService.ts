@@ -74,10 +74,14 @@ export async function sendRealEmail(options: EmailDispatchOptions): Promise<{ su
   const settings = options.getSettings ? options.getSettings() : {};
   const emailConfig = settings.emailConfig || {};
 
-  const senderEmail = (emailConfig.senderEmail || process.env.SENDER_EMAIL || PRIMARY_ADMIN_EMAIL).trim();
+  const configuredSender = (emailConfig.senderEmail || process.env.SENDER_EMAIL || '').trim();
   const senderName = (emailConfig.senderName || process.env.SENDER_NAME || 'متجر RYVO الرسمي').trim();
   const rawKey = emailConfig.resendApiKey || process.env.RESEND_API_KEY || DEFAULT_RESEND_API_KEY;
   const resendApiKey = (rawKey || '').trim();
+
+  // Determine official verified domain sender
+  const isPublicWebmail = !configuredSender || configuredSender.endsWith('@gmail.com') || configuredSender.endsWith('@yahoo.com') || configuredSender.endsWith('@hotmail.com');
+  const senderEmail = isPublicWebmail ? 'orders@ryvo.shop' : configuredSender;
 
   const logId = 'email_log_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
   const timestamp = new Date().toISOString();
@@ -93,8 +97,7 @@ export async function sendRealEmail(options: EmailDispatchOptions): Promise<{ su
 
       // Note: Resend API requires sending from onboarding@resend.dev unless sending domain is verified in Resend dashboard.
       // Free Gmail addresses (e.g., @gmail.com) cannot be used as the 'from' domain.
-      const isGmailOrPublicDomain = senderEmail.endsWith('@gmail.com') || senderEmail.endsWith('@yahoo.com') || senderEmail.endsWith('@hotmail.com');
-      const fromAddress = isGmailOrPublicDomain ? 'onboarding@resend.dev' : senderEmail;
+      const fromAddress = senderEmail;
       const fromField = `${senderName} <${fromAddress}>`;
       
       let resendResponse = await resend.emails.send({

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useConfirm } from './ConfirmationDialog';
 import { Activity, Laptop, Tablet, MapPin, FileText, Megaphone, Video, Edit, Sliders, Share2 } from 'lucide-react';
 import CJProductImporter from './CJProductImporter';
@@ -2138,7 +2138,7 @@ export default function AdminPanel({
   });
 
   // Fetch real users from Firestore via backend API
-  useEffect(() => {
+  const fetchUsers = useCallback(() => {
     fetch('/api/users')
       .then(res => res.json())
       .then(data => {
@@ -2156,6 +2156,16 @@ export default function AdminPanel({
       })
       .catch(err => console.error("Error fetching Firestore users:", err));
   }, []);
+
+  useEffect(() => {
+    fetchUsers();
+  }, [fetchUsers]);
+
+  useEffect(() => {
+    if (adminTab === 'users_passwords') {
+      fetchUsers();
+    }
+  }, [adminTab, fetchUsers]);
 
   // --- Advanced RBAC and Newsletter subscribers state ---
   const [newAdminRole, setNewAdminRole] = useState<'super_admin' | 'admin' | 'manager' | 'support' | 'warehouse' | 'marketing' | 'finance'>('admin');
@@ -9116,9 +9126,22 @@ export default function AdminPanel({
                   <span className="text-emerald-500">📋</span>
                   <span>{isRtl ? 'دليل عناوين شحن وطرق اتصال العملاء المعتمدين' : 'Authorized Client Directory & Logistic Profiles'}</span>
                 </span>
-                <span className="text-[10px] bg-emerald-500/10 text-emerald-600 px-2.5 py-0.5 rounded-xl font-bold">
-                  {registeredUsers.filter(u => u.role !== 'admin').length} {isRtl ? 'عميل نشط' : 'active customers'}
-                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      fetchUsers();
+                      setToastMessage(isRtl ? '🔄 جاري تحديث قائمة العملاء من قاعدة البيانات...' : '🔄 Refreshing customer list from database...');
+                    }}
+                    className="text-[10px] bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 px-2.5 py-1 rounded-xl font-bold flex items-center gap-1 transition-all"
+                  >
+                    <span>🔄</span>
+                    <span>{isRtl ? 'تحديث السجل' : 'Refresh'}</span>
+                  </button>
+                  <span className="text-[10px] bg-emerald-500/10 text-emerald-600 px-2.5 py-1 rounded-xl font-bold">
+                    {registeredUsers.filter(u => u.role !== 'admin').length} {isRtl ? 'عميل نشط' : 'active customers'}
+                  </span>
+                </div>
               </h4>
 
               {/* Local Customer Search Filter */}

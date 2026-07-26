@@ -903,6 +903,7 @@ interface GlobalSettings {
   emailConfig?: {
     senderEmail: string;
     senderName: string;
+    resendApiKey?: string;
     smtpHost?: string;
     smtpPort?: number;
     smtpSecure?: boolean;
@@ -975,8 +976,9 @@ const defaultSettings: GlobalSettings = {
     showNotifyMe: true
   },
   emailConfig: {
-    senderEmail: process.env.SENDER_EMAIL || "support@ryvo.shop",
+    senderEmail: process.env.SENDER_EMAIL || "orders@ryvo.shop",
     senderName: process.env.SENDER_NAME || "متجر RYVO الرسمي",
+    resendApiKey: process.env.RESEND_API_KEY || "re_9681892f-39e9-4bc1-88e6-c6eca8a771b9",
     smtpHost: process.env.SMTP_HOST || "",
     smtpPort: Number(process.env.SMTP_PORT || 587),
     smtpSecure: process.env.SMTP_SECURE === "true",
@@ -1868,11 +1870,13 @@ app.post("/api/orders", async (req, res) => {
 
     // Update Customer details in CRM database
     if (o.user_email) {
-      const userDocRef = doc(db, "users", o.user_email.toLowerCase());
+      const cleanEmail = o.user_email.toLowerCase().trim();
+      const userDocRef = doc(db, "users", cleanEmail);
       const userSnap = await getDoc(userDocRef);
+      const pointsEarned = Math.floor((o.total || 0) * 0.05);
+
       if (userSnap.exists()) {
         const userData = userSnap.data();
-        const pointsEarned = Math.floor(o.total * 0.05);
         const currentPoints = (userData.points || 0) + pointsEarned;
         const pointsHistoryItem = {
           id: "earn-" + Date.now(),
@@ -1888,6 +1892,12 @@ app.post("/api/orders", async (req, res) => {
         }
 
         const userUpdatePayload: any = {
+          name: userData.name || o.customer_name || o.shipping_address?.name || cleanEmail.split('@')[0],
+          phone: userData.phone || o.customer_phone || o.phone || o.shipping_address?.phone || "",
+          city: userData.city || o.city || o.shipping_address?.city || "",
+          district: userData.district || o.district || o.shipping_address?.district || "",
+          street: userData.street || o.street || o.shipping_address?.street || "",
+          postal_code: userData.postal_code || o.postal_code || o.shipping_address?.postal_code || "",
           points: currentPoints,
           points_history: [...(userData.points_history || []), pointsHistoryItem],
           wallet_balance: newWalletBalance,
@@ -1899,6 +1909,28 @@ app.post("/api/orders", async (req, res) => {
         }
 
         await updateDoc(userDocRef, userUpdatePayload);
+      } else {
+        // Automatically create new customer record in CRM database
+        const newCustomerRecord = {
+          email: cleanEmail,
+          name: o.customer_name || o.shipping_address?.name || cleanEmail.split('@')[0],
+          phone: o.customer_phone || o.phone || o.shipping_address?.phone || "",
+          city: o.city || o.shipping_address?.city || "",
+          district: o.district || o.shipping_address?.district || "",
+          street: o.street || o.shipping_address?.street || "",
+          postal_code: o.postal_code || o.shipping_address?.postal_code || "",
+          role: "customer",
+          createdAt: new Date().toISOString(),
+          points: 100 + pointsEarned,
+          points_history: [
+            { id: "wel-1", reason_ar: "نقاط ترحيبية لتسجيل الحساب", reason_en: "Welcome bonus points", points: 100, date: new Date().toISOString() },
+            { id: "earn-" + Date.now(), reason_ar: `نقاط شراء مكافأة للطلب #${o.id}`, reason_en: `Loyalty points reward for Order #${o.id}`, points: pointsEarned, date: new Date().toISOString() }
+          ],
+          wallet_balance: 0,
+          wallet_history: [],
+          order_history: [{ id: o.id, total: o.total, date: o.date, status: o.status }]
+        };
+        await setDoc(userDocRef, newCustomerRecord);
       }
     }
 

@@ -2448,7 +2448,7 @@ export default function AdminPanel({
     setNotifyingOrder(null);
   };
 
-  const handlePasswordChangeByAdmin = () => {
+  const handlePasswordChangeByAdmin = async () => {
     if (!selectedUserEmail) {
       triggerToast(isRtl ? 'يرجى اختيار بريد العميل!' : 'Please select a customer email first!');
       return;
@@ -2457,6 +2457,24 @@ export default function AdminPanel({
       triggerToast(isRtl ? 'يرجى كتابة كلمة المرور الجديدة!' : 'Please enter the new password!');
       return;
     }
+
+    const targetUser = registeredUsers.find(u => u.email.toLowerCase() === selectedUserEmail.toLowerCase());
+    const updatedUserData = {
+      ...(targetUser || {}),
+      email: selectedUserEmail.toLowerCase().trim(),
+      password: newPassword
+    };
+
+    try {
+      await fetch('/api/users/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedUserData)
+      });
+    } catch (err) {
+      console.error("Error persisting customer password change:", err);
+    }
+
     const updated = registeredUsers.map(u => {
       if (u.email.toLowerCase() === selectedUserEmail.toLowerCase()) {
         return { ...u, password: newPassword };
@@ -2466,7 +2484,7 @@ export default function AdminPanel({
     setRegisteredUsers(updated);
     localStorage.setItem('ryvo_registered_users', JSON.stringify(updated));
     setNewPassword('');
-    triggerToast(isRtl ? 'تم تغيير كلمة مرور العميل بنجاح!' : 'Customer password changed successfully!');
+    triggerToast(isRtl ? 'تم تغيير كلمة مرور العميل وتحديث السجل بنجاح! 🔑' : 'Customer password changed & database updated successfully! 🔑');
   };
 
   // Group emails messaging

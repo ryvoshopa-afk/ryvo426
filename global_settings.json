@@ -29,5 +29,15 @@
     "tiktok": "",
     "snapchat": ""
   },
-  "heroSlides": null
+  "heroSlides": null,
+  "emailConfig": {
+    "senderEmail": "orders@ryvo.shop",
+    "senderName": "متجر RYVO الرسمي",
+    "resendApiKey": "re_9681892f-39e9-4bc1-88e6-c6eca8a771b9",
+    "smtpHost": "smtp.gmail.com",
+    "smtpPort": 465,
+    "smtpSecure": true,
+    "smtpUser": "ryvo.shopa@gmail.com",
+    "smtpPass": ""
+  }
 }

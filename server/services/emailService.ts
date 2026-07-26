@@ -44,7 +44,7 @@ let inMemoryLogs: EmailLogEntry[] = [];
 
 // Primary default admin email & Resend credentials
 export const PRIMARY_ADMIN_EMAIL = 'ryvo.shopa@gmail.com';
-export const DEFAULT_RESEND_API_KEY = 're_STwDkaCe_CU2mJyDXRejPaU4RZdwvN9h7';
+export const DEFAULT_RESEND_API_KEY = 're_9681892f-39e9-4bc1-88e6-c6eca8a771b9';
 
 /**
  * Utility to resolve the application's base URL dynamically.
@@ -77,7 +77,10 @@ export async function sendRealEmail(options: EmailDispatchOptions): Promise<{ su
   const configuredSender = (emailConfig.senderEmail || process.env.SENDER_EMAIL || '').trim();
   const senderName = (emailConfig.senderName || process.env.SENDER_NAME || 'متجر RYVO الرسمي').trim();
   const rawKey = emailConfig.resendApiKey || process.env.RESEND_API_KEY || DEFAULT_RESEND_API_KEY;
-  const resendApiKey = (rawKey || '').trim();
+  let resendApiKey = (rawKey || '').trim();
+  if (resendApiKey && !resendApiKey.startsWith('re_')) {
+    resendApiKey = `re_${resendApiKey}`;
+  }
 
   // Determine official verified domain sender
   const isPublicWebmail = !configuredSender || configuredSender.endsWith('@gmail.com') || configuredSender.endsWith('@yahoo.com') || configuredSender.endsWith('@hotmail.com');

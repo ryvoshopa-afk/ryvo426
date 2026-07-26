@@ -35,7 +35,10 @@ import {
   sendCustomerOrderStatusEmail, 
   sendAdminNewOrderNotification, 
   sendAdminSupportRequestNotification, 
+  sendCustomerSupportConfirmation,
   sendBulkNewsletterEmails, 
+  sendOtpVerificationEmail,
+  sendWelcomeEmail,
   getBaseUrl,
   PRIMARY_ADMIN_EMAIL 
 } from "./server/services/emailService.js";
@@ -2087,7 +2090,7 @@ app.post("/api/auth/login", async (req, res) => {
         email: cleanEmail,
         name: isSuperAdmin ? "أدمن رايفو" : "مشرف المتجر",
         role: "admin",
-        password: password || "123456",
+        password: "123456",
         favorites: [],
         points: 1000,
         wallet_balance: 500
@@ -2103,9 +2106,14 @@ app.post("/api/auth/login", async (req, res) => {
       return res.status(404).json({ error: "المستخدم غير موجود في قاعدة البيانات (User not found)" });
     }
 
-    // Password validation (with standard 123456 fallback for primary super admin)
-    if (password && userData.password && userData.password !== password && !(isSuperAdmin && password === "123456")) {
-      return res.status(401).json({ error: "كلمة المرور غير صحيحة (Incorrect password)" });
+    if (!password || !password.trim()) {
+      return res.status(400).json({ error: "كلمة المرور مطلوبة (Password is required)" });
+    }
+
+    // Password validation - strictly compare provided password against stored user password
+    const storedPassword = userData.password;
+    if (!storedPassword || storedPassword !== password.trim()) {
+      return res.status(401).json({ error: "كلمة المرور غير صحيحة (Invalid Credentials)" });
     }
 
     // Ensure role is ALWAYS 'admin' for super admin and sub-admins
@@ -2269,23 +2277,150 @@ app.post("/api/auth/me", handleMeAndProfileRequest);
 app.get("/api/profile", handleMeAndProfileRequest);
 app.post("/api/profile", handleMeAndProfileRequest);
 
+// In-memory OTP storage fallback
+const inMemoryOtps = new Map<string, { code: string; expiresAt: number; purpose: string }>();
+
+// SEND OTP ENDPOINT (6-digit verification code)
+app.post("/api/auth/send-otp", async (req, res) => {
+  try {
+    const { email, purpose = 'verification' } = req.body;
+    if (!email || !email.includes("@")) {
+      return res.status(400).json({ error: "البريد الإلكتروني المطلوب غير صحيح" });
+    }
+
+    const cleanEmail = email.toLowerCase().trim();
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
+
+    // Store in memory map
+    inMemoryOtps.set(`${cleanEmail}_${purpose}`, { code: otpCode, expiresAt, purpose });
+
+    // Store in Firestore otps collection
+    if (db) {
+      try {
+        await setDoc(doc(db, "otps", `${cleanEmail}_${purpose}`), {
+          email: cleanEmail,
+          code: otpCode,
+          purpose,
+          createdAt: new Date().toISOString(),
+          expiresAt: new Date(expiresAt).toISOString()
+        }, { merge: true });
+      } catch (err: any) {
+        console.warn("⚠️ Failed to store OTP in Firestore:", err.message);
+      }
+    }
+
+    // Send Real Email with 6-Digit OTP
+    const emailResult = await sendOtpVerificationEmail(cleanEmail, otpCode, purpose as any, db, getSettings);
+
+    res.json({
+      success: true,
+      message: `تم إرسال رمز الأمان (OTP) إلى البريد الإلكتروني ${cleanEmail} بنجاح!`,
+      email: cleanEmail,
+      otpSent: true,
+      emailLog: emailResult.log
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// VERIFY OTP ENDPOINT
+app.post("/api/auth/verify-otp", async (req, res) => {
+  try {
+    const { email, code, purpose = 'verification', newPassword } = req.body;
+    if (!email || !code) {
+      return res.status(400).json({ error: "البريد الإلكتروني ورمز التحقق كلاهما مطلوبان" });
+    }
+
+    const cleanEmail = email.toLowerCase().trim();
+    const cleanCode = code.toString().trim();
+
+    let isValid = false;
+
+    // Check memory store
+    const memOtp = inMemoryOtps.get(`${cleanEmail}_${purpose}`);
+    if (memOtp && memOtp.code === cleanCode && memOtp.expiresAt > Date.now()) {
+      isValid = true;
+    }
+
+    // Check Firestore
+    if (!isValid && db) {
+      try {
+        const otpSnap = await getDoc(doc(db, "otps", `${cleanEmail}_${purpose}`));
+        if (otpSnap.exists()) {
+          const data = otpSnap.data();
+          if (data.code === cleanCode && new Date(data.expiresAt).getTime() > Date.now()) {
+            isValid = true;
+          }
+        }
+      } catch (err: any) {
+        console.warn("⚠️ Firestore OTP check warning:", err.message);
+      }
+    }
+
+    if (!isValid) {
+      return res.status(400).json({ error: "رمز التحقق المكون من 6 أرقام غير صحيح أو انتهت صلاحيته. يرجى طلب رمز جديد." });
+    }
+
+    // Clean up OTP
+    inMemoryOtps.delete(`${cleanEmail}_${purpose}`);
+
+    let safeUser: any = null;
+
+    if (db) {
+      const userRef = doc(db, "users", cleanEmail);
+      const userSnap = await getDoc(userRef);
+
+      if (purpose === 'verification' || purpose === 'login') {
+        if (userSnap.exists()) {
+          await updateDoc(userRef, { emailVerified: true, status: "active" });
+          const updatedUser = (await getDoc(userRef)).data();
+          const { password: _, ...cleanUserData } = updatedUser || {};
+          safeUser = cleanUserData;
+
+          // Send welcome email if newly verified
+          if (!userSnap.data().emailVerified) {
+            sendWelcomeEmail(cleanEmail, safeUser?.name || 'عميل رايفو', db, getSettings).catch(() => {});
+          }
+        }
+      } else if (purpose === 'reset' && newPassword) {
+        if (userSnap.exists()) {
+          await updateDoc(userRef, { password: newPassword, emailVerified: true });
+          const updatedUser = (await getDoc(userRef)).data();
+          const { password: _, ...cleanUserData } = updatedUser || {};
+          safeUser = cleanUserData;
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      verified: true,
+      message: "تم التحقق من الرمز وتفعيل الحساب بنجاح!",
+      user: safeUser
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post("/api/auth/register", async (req, res) => {
   if (!db) return res.status(500).json({ error: "Database not connected" });
   try {
     const { email, name, password } = req.body;
     if (!email || !name || !password) {
-      return res.status(400).json({ error: "All credentials are required" });
+      return res.status(400).json({ error: "جميع البيانات مطلوبة للتسجيل" });
     }
     const cleanEmail = email.toLowerCase().trim();
     const docRef = doc(db, "users", cleanEmail);
     const snap = await getDoc(docRef);
     if (snap.exists()) {
-      return res.status(400).json({ error: "Email already registered" });
+      return res.status(400).json({ error: "البريد الإلكتروني مسجل بالفعل! يمكنك تسجيل الدخول مباشرة" });
     }
 
-    const verifyToken = "vtoken_" + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
-    const baseUrl = getBaseUrl(req);
-    const confirmUrl = `${baseUrl}/verify?token=${verifyToken}&email=${encodeURIComponent(cleanEmail)}`;
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = Date.now() + 10 * 60 * 1000;
 
     const newUser = {
       email: cleanEmail,
@@ -2293,7 +2428,6 @@ app.post("/api/auth/register", async (req, res) => {
       password,
       role: "customer",
       emailVerified: false,
-      emailVerificationToken: verifyToken,
       favorites: [],
       points: 100,
       points_history: [
@@ -2304,36 +2438,31 @@ app.post("/api/auth/register", async (req, res) => {
     };
     await setDoc(docRef, newUser);
 
-    // Save verification record
+    // Save OTP
+    inMemoryOtps.set(`${cleanEmail}_verification`, { code: otpCode, expiresAt, purpose: 'verification' });
     try {
-      await setDoc(doc(db, "email_verifications", cleanEmail), {
+      await setDoc(doc(db, "otps", `${cleanEmail}_verification`), {
         email: cleanEmail,
-        token: verifyToken,
+        code: otpCode,
+        purpose: 'verification',
         createdAt: new Date().toISOString(),
-        status: "pending"
+        expiresAt: new Date(expiresAt).toISOString()
       }, { merge: true });
     } catch (_) {}
 
-    // Trigger real welcome/registration email with 1-click confirmation link
-    sendRealEmail({
-      to: cleanEmail,
-      subject: `أهلاً بك في متجر RYVO الرسمي - يرجى تأكيد حسابك 🎉`,
-      html: buildHtmlEmailTemplate(
-        `تم إنشاء حسابك بنجاح!`,
-        `مرحباً ${name}!`,
-        `<p>يسعدنا انضمامك إلى العائلة الرسمية لمتجر RYVO. تم إضافة <strong>100 نقطة ولاء مجانية</strong> كهدية ترحيبية فورية بحسابك!</p>
-         <p>يرجى النقر على الزر أدناه لتأكيد وتفعيل بريدك الإلكتروني والبدء بالتسوق فوراً:</p>`,
-        `تأكيد وتفعيل البريد الإلكتروني الآن ✉️`,
-        confirmUrl,
-        `مرحباً بك 🎉`
-      ),
-      triggerEvent: 'account_creation',
-      db,
-      getSettings
-    }).catch(err => console.error("Email send error on registration:", err));
+    // Send 6-Digit OTP Email
+    sendOtpVerificationEmail(cleanEmail, otpCode, 'verification', db, getSettings).catch(err => {
+      console.error("Failed sending registration OTP email:", err);
+    });
 
     const { password: _, ...safeUser } = newUser;
-    res.json({ success: true, user: safeUser, confirmUrl });
+    res.json({
+      success: true,
+      user: safeUser,
+      requiresOtp: true,
+      email: cleanEmail,
+      message: "تم إنشاء الحساب بنجاح! تم إرسال رمز الأمان المكون من 6 أرقام إلى بريدك الإلكتروني للتأكيد."
+    });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
@@ -2346,44 +2475,118 @@ app.post("/api/auth/forgot-password", async (req, res) => {
     if (!email) return res.status(400).json({ error: "البريد الإلكتروني مطلوب" });
 
     const cleanEmail = email.toLowerCase().trim();
-    const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
-    const resetToken = "reset_" + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
-    const baseUrl = getBaseUrl(req);
-    const resetUrl = `${baseUrl}/api/auth/verify-reset-link?token=${resetToken}&email=${encodeURIComponent(cleanEmail)}`;
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = Date.now() + 10 * 60 * 1000;
+
+    inMemoryOtps.set(`${cleanEmail}_reset`, { code: otpCode, expiresAt, purpose: 'reset' });
 
     if (db) {
       try {
-        await setDoc(doc(db, "password_resets", cleanEmail), {
+        await setDoc(doc(db, "otps", `${cleanEmail}_reset`), {
           email: cleanEmail,
-          code: resetCode,
-          token: resetToken,
-          createdAt: new Date().toISOString()
+          code: otpCode,
+          purpose: 'reset',
+          createdAt: new Date().toISOString(),
+          expiresAt: new Date(expiresAt).toISOString()
         }, { merge: true });
       } catch (_) {}
     }
 
-    const result = await sendRealEmail({
-      to: cleanEmail,
-      subject: `رمز ورابط استعادة كلمة المرور - متجر RYVO 🔐`,
-      html: buildHtmlEmailTemplate(
-        `استعادة كلمة المرور`,
-        `عزيزي العميل،`,
-        `<p>لقد استلمنا طلباً لإعادة ضبط كلمة المرور المرتبطة بحسابك (${cleanEmail}).</p>
-         <p>يرجى استخدام رمز الأمان المؤقت التالي لاستكمال إعادة الضبط:</p>
-         <div style="background:#0f172a; padding:18px; border-radius:12px; text-align:center; font-size:26px; font-weight:900; letter-spacing:6px; color:#38bdf8; border:1px solid #0284c7; margin:18px 0;">
-           ${resetCode}
-         </div>
-         <p>أو يمكنك النقر مباشرة على زر إعادة الضبط التالي:</p>`,
-        `إعادة ضبط كلمة المرور الآن 🔑`,
-        resetUrl,
-        `استعادة الحساب 🔐`
-      ),
-      triggerEvent: 'password_reset',
-      db,
-      getSettings
-    });
+    const result = await sendOtpVerificationEmail(cleanEmail, otpCode, 'reset', db, getSettings);
 
-    res.json({ success: true, message: "تم إرسال رمز ورابط استعادة كلمة المرور إلى بريدك الإلكتروني بنجاح!", resetCode, resetToken, emailLog: result.log });
+    res.json({
+      success: true,
+      requiresOtp: true,
+      email: cleanEmail,
+      message: "تم إرسال رمز استعادة كلمة المرور المكون من 6 أرقام إلى بريدك الإلكتروني بنجاح!",
+      emailLog: result.log
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// RESET PASSWORD WITH OTP
+app.post("/api/auth/reset-password", async (req, res) => {
+  try {
+    const { email, code, newPassword } = req.body;
+    if (!email || !code || !newPassword) {
+      return res.status(400).json({ error: "البريد، كود OTP، وكلمة المرور الجديدة كلها مطلوبة" });
+    }
+
+    const cleanEmail = email.toLowerCase().trim();
+    const cleanCode = code.toString().trim();
+
+    let isValid = false;
+    const memOtp = inMemoryOtps.get(`${cleanEmail}_reset`);
+    if (memOtp && memOtp.code === cleanCode && memOtp.expiresAt > Date.now()) {
+      isValid = true;
+    }
+
+    if (!isValid && db) {
+      try {
+        const otpSnap = await getDoc(doc(db, "otps", `${cleanEmail}_reset`));
+        if (otpSnap.exists()) {
+          const data = otpSnap.data();
+          if (data.code === cleanCode && new Date(data.expiresAt).getTime() > Date.now()) {
+            isValid = true;
+          }
+        }
+      } catch (_) {}
+    }
+
+    if (!isValid) {
+      return res.status(400).json({ error: "كود التحقق الخاص بكلمة المرور غير صحيح أو انتهت صلاحيته" });
+    }
+
+    if (db) {
+      const userRef = doc(db, "users", cleanEmail);
+      await updateDoc(userRef, { password: newPassword, emailVerified: true });
+    }
+
+    inMemoryOtps.delete(`${cleanEmail}_reset`);
+
+    res.json({ success: true, message: "تم تغيير كلمة المرور وتحديث الحساب بنجاح! يمكنك الآن تسجيل الدخول." });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// CONTACT US ENDPOINT WITH EMAIL NOTIFICATIONS
+app.post("/api/contact", async (req, res) => {
+  try {
+    const { name, email, phone, message } = req.body;
+    if (!email || !message) {
+      return res.status(400).json({ error: "البريد الإلكتروني والرسالة مطلوبان" });
+    }
+
+    const cleanEmail = email.toLowerCase().trim();
+
+    if (db) {
+      try {
+        await addDoc(collection(db, "contact_messages"), {
+          name: name || 'عميل المتجر',
+          email: cleanEmail,
+          phone: phone || '',
+          message,
+          createdAt: new Date().toISOString(),
+          status: 'unread'
+        });
+      } catch (err: any) {
+        console.warn("⚠️ Failed to store contact message in Firestore:", err.message);
+      }
+    }
+
+    // 1. Send Confirmation Email to Customer
+    sendCustomerSupportConfirmation(cleanEmail, name || 'عميل رايفو', message, db, getSettings).catch(() => {});
+
+    // 2. Send Alert Email to Admin
+    sendAdminSupportRequestNotification(cleanEmail, name || 'عميل المتجر', message, undefined, db, getSettings).catch(() => {});
+
+    res.json({
+      success: true,
+      message: "تم استلام رسالتك بنجاح! تم إرسال تأكيد إلى بريدك الإلكتروني وسيتم التواصل معك قريباً."
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

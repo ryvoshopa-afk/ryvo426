@@ -75,17 +75,88 @@ export default function AuthModal({
   const t = TRANSLATIONS[currentLanguage];
   const isRtl = currentLanguage === 'ar';
 
-  const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot'>('login');
+  const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot' | 'otp_verify'>('login');
+  const [otpPurpose, setOtpPurpose] = useState<'verification' | 'reset'>('verification');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
   const [fullname, setFullname] = useState('');
+  const [otpCode, setOtpCode] = useState('');
   const [feedback, setFeedback] = useState<{ type: 'error' | 'success', text: string } | null>(null);
   const [showPassword, setShowPassword] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleVerifyOtpSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setFeedback(null);
+    setIsLoading(true);
+
+    const cleanEmail = email.toLowerCase().trim();
+    const cleanCode = otpCode.trim();
+
+    if (!cleanCode || cleanCode.length !== 6) {
+      setFeedback({ type: 'error', text: isRtl ? 'يرجى إدخال كود الأمان المكون من 6 أرقام كاملاً' : 'Please enter the complete 6-digit OTP code' });
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/auth/verify-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: cleanEmail,
+          code: cleanCode,
+          purpose: otpPurpose,
+          newPassword: otpPurpose === 'reset' ? (newPassword || password) : undefined
+        })
+      });
+      const data = await res.json();
+
+      if (data.success || data.verified) {
+        setFeedback({
+          type: 'success',
+          text: isRtl ? 'تم التحقق من الكود وتأكيد الحساب بنجاح! 🔓' : 'Code verified and account activated successfully! 🔓'
+        });
+
+        const registeredList = getRegisteredUsers();
+        let userToLog: User = data.user || {
+          email: cleanEmail,
+          name: fullname || cleanEmail.split('@')[0],
+          role: cleanEmail === 'ryvo.shopa@gmail.com' ? 'admin' : 'customer',
+          favorites: [],
+          points: 100
+        };
+
+        const existingIdx = registeredList.findIndex(u => u.email.toLowerCase() === cleanEmail);
+        if (existingIdx > -1) {
+          registeredList[existingIdx] = { ...registeredList[existingIdx], ...userToLog };
+        } else {
+          registeredList.push(userToLog);
+        }
+        saveRegisteredUsers(registeredList);
+
+        setTimeout(() => {
+          onAuthSuccess(userToLog);
+          onClose();
+        }, 1000);
+      } else {
+        setFeedback({ type: 'error', text: data.error || (isRtl ? 'رمز التحقق المكون من 6 أرقام غير صحيح أو انتهت صلاحيته' : 'Invalid or expired OTP code') });
+      }
+    } catch (err) {
+      setFeedback({ type: 'error', text: isRtl ? 'حدث خطأ في الاتصال بالخادم' : 'Server connection error' });
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setFeedback(null);
+    if (authMode === 'otp_verify') {
+      return handleVerifyOtpSubmit(e);
+    }
 
+    setFeedback(null);
     const cleanEmail = email.toLowerCase().trim();
 
     if (authMode === 'forgot') {
@@ -94,7 +165,7 @@ export default function AuthModal({
         return;
       }
 
-      // Trigger real backend password recovery email via Resend
+      setIsLoading(true);
       try {
         const res = await fetch('/api/auth/forgot-password', {
           method: 'POST',
@@ -103,57 +174,23 @@ export default function AuthModal({
         });
         const data = await res.json();
         if (data.success) {
+          setOtpPurpose('reset');
+          setAuthMode('otp_verify');
           setFeedback({
             type: 'success',
             text: isRtl 
-              ? 'تم إرسال رابط آمن ورمز استعادة كلمة المرور مباشرة إلى بريدك الإلكتروني بنجاح! 📩' 
-              : 'A secure reset link and code have been sent directly to your email inbox! 📩'
+              ? 'تم إرسال كود استعادة كلمة المرور المكون من 6 أرقام إلى بريدك الإلكتروني بنجاح! 📩' 
+              : 'A 6-digit recovery code has been sent directly to your email inbox! 📩'
           });
+          setIsLoading(false);
           return;
+        } else {
+          setFeedback({ type: 'error', text: data.error || (isRtl ? 'تعذر إرسال الكود' : 'Failed to send recovery code') });
         }
       } catch (err) {
-        console.error("Forgot password API call error:", err);
-      }
-
-      // Fallback local recovery process
-      const users = getRegisteredUsers();
-      const existingUser = users.find(u => u.email.toLowerCase() === cleanEmail);
-      if (existingUser) {
-        const foundPassword = existingUser.password || '123456';
-        sendSimulatedEmail(
-          cleanEmail,
-          isRtl ? 'استعادة كلمة المرور لمتجر رايفو 🔑' : 'Password Recovery - Ryvo Store 🔑',
-          isRtl 
-            ? `أهلاً بك ${existingUser.name}،\n\nلقد تلقينا طلباً لاستعادة كلمة المرور الخاصة بك.\nكلمة السر الحالية لحسابك هي: [ ${foundPassword} ]\n\nيرجى استخدامها لتسجيل الدخول بأمان وتغييرها من لوحة التحكم في أي وقت.\n\nطاب يومك بكل خير،\nفريق دعم رايفو الفاخر.`
-            : `Hello ${existingUser.name},\n\nWe received a request to recover your password.\nYour current password is: [ ${foundPassword} ]\n\nPlease use it to login securely and modify it from your dashboard in settings at any time.\n\nBest regards,\nRyvo Store Support Team.`
-        );
-        setFeedback({
-          type: 'success',
-          text: isRtl 
-            ? `تم إرسال كلمة المرور بنجاح إلى بريدك الإلكتروني! كلمة مرورك هي: ${foundPassword}`
-            : `Your password has been retrieved and sent to your email successfully! Password: ${foundPassword}`
-        });
-      } else {
-        // Create user with temp password and send mail
-        const tempPass = `ryvo-${Math.floor(1000 + Math.random() * 9000)}`;
-        const namePart = cleanEmail.split('@')[0];
-        const newCustName = namePart.charAt(0).toUpperCase() + namePart.slice(1);
-        const newUser: User = {
-          email: cleanEmail,
-          name: newCustName,
-          role: 'customer',
-          favorites: [],
-          password: tempPass
-        };
-        const updatedUsers = [...users, newUser];
-        saveRegisteredUsers(updatedUsers);
-
-        setFeedback({
-          type: 'success',
-          text: isRtl 
-            ? `لم نعثر على بريد مسجل، قمنا بإنشاء حساب وإرسال كلمة السر المؤقتة إليه! بريدك الوارد تصله كلمة السر: ${tempPass}`
-            : `Email not registered. We set up an account and generated a temp password: ${tempPass}. Check your Inbox!`
-        });
+        console.error("Forgot password API error:", err);
+      } finally {
+        setIsLoading(false);
       }
       return;
     }
@@ -221,26 +258,36 @@ export default function AuthModal({
             onClose();
           }, 1000);
           return;
+        } else {
+          const resErr = await response.json().catch(() => ({}));
+          const errMsg = resErr.error || (isRtl ? 'كلمة المرور أو البريد الإلكتروني غير صحيح' : 'Invalid email address or password');
+          setFeedback({ type: 'error', text: errMsg });
+          return;
         }
       } catch (apiErr) {
-        console.warn("⚠️ API Login failed, attempting local fallback:", apiErr);
+        console.warn("⚠️ API Login failed due to network error, attempting local fallback:", apiErr);
       }
 
-      // Local Fallback Check
+      // Local Fallback Check (only when network/server is unreachable)
       let match = registeredList.find(u => u.email.toLowerCase() === cleanEmail && u.password === password);
 
-      // Force super admin role if logging in with primary email
+      // Force super admin role if logging in with primary email (strictly verify password)
       if (cleanEmail === 'ryvo.shopa@gmail.com') {
-        if (!match) {
-          match = {
-            email: 'ryvo.shopa@gmail.com',
-            name: 'أدمن رايفو',
-            role: 'admin',
-            favorites: [],
-            password: password || '123456'
-          };
+        const superPass = match?.password || '123456';
+        if (password === superPass) {
+          if (!match) {
+            match = {
+              email: 'ryvo.shopa@gmail.com',
+              name: 'أدمن رايفو',
+              role: 'admin',
+              favorites: [],
+              password: '123456'
+            };
+          } else {
+            match.role = 'admin';
+          }
         } else {
-          match.role = 'admin';
+          match = undefined;
         }
       }
 
@@ -328,6 +375,7 @@ export default function AuthModal({
         return;
       }
 
+      setIsLoading(true);
       const roleType = cleanEmail === 'ryvo.shopa@gmail.com' ? 'admin' : 'customer';
       let newRegisteredUser: User = {
         email: cleanEmail,
@@ -348,7 +396,6 @@ export default function AuthModal({
         ] : []
       };
 
-      // Call backend API to persist customer in Firestore & trigger Resend welcome email with verification link
       try {
         const regRes = await fetch('/api/auth/register', {
           method: 'POST',
@@ -361,23 +408,33 @@ export default function AuthModal({
             type: 'error',
             text: isRtl ? 'هذا البريد الإلكتروني مسجل بالفعل لمستخدم آخر!' : 'Email already linked to another active account!'
           });
+          setIsLoading(false);
           return;
         }
-        if (regData.user) {
-          newRegisteredUser = { ...newRegisteredUser, ...regData.user };
-        }
+
+        // Move to OTP verification
+        setOtpPurpose('verification');
+        setAuthMode('otp_verify');
+        setFeedback({
+          type: 'success',
+          text: isRtl
+            ? 'تم إرسال كود التفعيل المكون من 6 أرقام إلى بريدك الإلكتروني بنجاح! 📩 أدخل الكود لإكمال التسجيل:'
+            : 'A 6-digit OTP verification code was sent to your email inbox! 📩 Enter the code to activate your account:'
+        });
+
+        const newList = [...registeredList, newRegisteredUser];
+        saveRegisteredUsers(newList);
       } catch (err) {
         console.error("Backend register API error:", err);
+        setOtpPurpose('verification');
+        setAuthMode('otp_verify');
+        setFeedback({
+          type: 'success',
+          text: isRtl ? 'تم إنشاء الحساب، يرجى إدخال رمز التأكيد المرسل لبريدك' : 'Account created, please enter your OTP code'
+        });
+      } finally {
+        setIsLoading(false);
       }
-
-      const newList = [...registeredList, newRegisteredUser];
-      saveRegisteredUsers(newList);
-
-      setFeedback({ type: 'success', text: currentLanguage === 'ar' ? 'تم إنشاء الحساب وتأكيده بنجاح! جاري تسجيل الدخول...' : 'Account created successfully! Logging you in.' });
-      setTimeout(() => {
-        onAuthSuccess(newRegisteredUser);
-        onClose();
-      }, 1200);
     }
   };
 
@@ -401,12 +458,20 @@ export default function AuthModal({
         {/* Title */}
         <div className="space-y-2 text-center pb-4">
           <h2 className="text-xl font-black tracking-tight text-slate-950 dark:text-white">
-            {authMode === 'login' ? t.login : authMode === 'register' ? t.register : (isRtl ? 'استعادة كلمة المرور' : 'Recover Password')}
+            {authMode === 'login' 
+              ? t.login 
+              : authMode === 'register' 
+                ? t.register 
+                : authMode === 'otp_verify'
+                  ? (isRtl ? 'تأكيد كود الأمان 🔐' : 'Enter 6-Digit OTP 🔐')
+                  : (isRtl ? 'استعادة كلمة المرور' : 'Recover Password')}
           </h2>
           <p className="text-xs text-slate-400 max-w-[280px] mx-auto leading-relaxed">
             {authMode === 'forgot' 
-              ? (isRtl ? 'أدخل بريدك الإلكتروني وسنرسل لك كلمة المرور فوراً' : 'Enter your registered email and we will locate and send your credentials')
-              : t.welcome_text}
+              ? (isRtl ? 'أدخل بريدك الإلكتروني وسنرسل لك كود التوثيق فوراً' : 'Enter your registered email and we will send a 6-digit code')
+              : authMode === 'otp_verify'
+                ? (isRtl ? `أدخل الرمز المكون من 6 أرقام المرسل إلى ${email}` : `Enter the 6-digit code sent to ${email}`)
+                : t.welcome_text}
           </p>
         </div>
 
@@ -415,7 +480,7 @@ export default function AuthModal({
           <div className={`p-4 rounded-xl text-xs font-bold ${
             feedback.type === 'error' 
               ? 'bg-rose-500/10 text-rose-500 border border-rose-500/20' 
-              : 'bg-[var(--primary-color, #38bdf8)]/10 text-[var(--primary-color, #38bdf8)] border border-[var(--primary-color, #38bdf8)]/20'
+              : 'bg-[var(--primary-color, #dc2626)]/10 text-[var(--primary-color, #dc2626)] border border-[var(--primary-color, #dc2626)]/20'
           } mb-4 text-center`}>
             {feedback.type === 'success' && <UserCheck className="w-4 h-4 inline-block align-middle me-1" />}
             <span>{feedback.text}</span>
@@ -425,78 +490,129 @@ export default function AuthModal({
         {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
           
-          {/* Full Name for register */}
-          {authMode === 'register' && (
-            <div className="space-y-1">
-              <label className="text-[10px] uppercase font-black tracking-widest text-slate-400 block">{t.fullname_label}</label>
-              <input
-                id="auth-reg-fullname"
-                type="text"
-                required
-                value={fullname}
-                onChange={(e) => setFullname(e.target.value)}
-                className={`w-full text-base md:text-xs px-3.5 py-3 rounded-xl border bg-slate-50 dark:bg-[#0A0C10] border-transparent focus:border-[var(--primary-color, #38bdf8)] focus:bg-white dark:focus:bg-black text-slate-800 dark:text-white outline-none transition-all ${
-                  isRtl ? 'text-right' : 'text-left'
-                }`}
-              />
-            </div>
-          )}
-
-          {/* Email */}
-          <div className="space-y-1">
-            <label className="text-[10px] uppercase font-black tracking-widest text-slate-400 block">{t.email_label}</label>
-            <div className="relative">
-              <div className={`absolute inset-y-0 ${isRtl ? 'left-3' : 'right-3'} flex items-center pointer-events-none text-slate-400`}>
-                <Mail className="w-4 h-4" />
-              </div>
-              <input
-                id="auth-email-input"
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className={`w-full text-base md:text-xs py-3 px-3.5 pr-10 rounded-xl border bg-slate-50 dark:bg-[#0A0C10] border-transparent focus:border-[var(--primary-color, #38bdf8)] focus:bg-white dark:focus:bg-black text-slate-850 dark:text-white outline-none transition-all ${
-                  isRtl ? 'text-right pr-3.5 pl-10' : 'text-left pr-10 pl-3.5'
-                }`}
-              />
-            </div>
-          </div>
-
-          {/* Password */}
-          {authMode !== 'forgot' && (
-            <div className="space-y-1 font-sans">
-              <label className="text-[10px] uppercase font-black tracking-widest text-slate-400 block">{t.password_label}</label>
-              <div className="relative font-sans">
-                <div className={`absolute inset-y-0 ${isRtl ? 'left-3' : 'right-3'} flex items-center pointer-events-none text-slate-400`}>
-                  <Key className="w-4 h-4" />
-                </div>
+          {/* OTP Mode 6-Digit Code Input */}
+          {authMode === 'otp_verify' ? (
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <label className="text-[10px] uppercase font-black tracking-widest text-slate-400 block text-center">
+                  {isRtl ? 'رمز التأكيد المكون من 6 أرقام' : '6-Digit Verification OTP'}
+                </label>
                 <input
-                  id="auth-password-input"
-                  type={showPassword ? 'text' : 'password'}
+                  id="auth-otp-input"
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={6}
                   required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full text-base md:text-xs py-3 px-10 rounded-xl border bg-slate-50 dark:bg-[#0A0C10] border-transparent focus:border-[var(--primary-color, #38bdf8)] focus:bg-white dark:focus:bg-black text-slate-850 dark:text-white outline-none transition-all placeholder-slate-400 text-center"
+                  value={otpCode}
+                  onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
+                  placeholder="123456"
+                  className="w-full text-center text-2xl font-mono tracking-[0.5em] py-3.5 px-4 rounded-xl border bg-slate-50 dark:bg-[#0A0C10] border-slate-300 dark:border-slate-700 focus:border-red-500 focus:bg-white dark:focus:bg-black text-slate-850 dark:text-white outline-none transition-all"
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className={`absolute inset-y-0 ${isRtl ? 'right-3' : 'left-3'} flex items-center text-slate-400 hover:text-[var(--primary-color)] transition-colors`}
-                  aria-label="Toggle password visibility"
-                >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
               </div>
+
+              {otpPurpose === 'reset' && (
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase font-black tracking-widest text-slate-400 block">
+                    {isRtl ? 'كلمة المرور الجديدة' : 'New Password'}
+                  </label>
+                  <input
+                    type="password"
+                    required
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-full text-sm py-2.5 px-3.5 rounded-xl border bg-slate-50 dark:bg-[#0A0C10] border-slate-300 dark:border-slate-700 focus:border-red-500 text-slate-850 dark:text-white outline-none"
+                  />
+                </div>
+              )}
             </div>
+          ) : (
+            <>
+              {/* Full Name for register */}
+              {authMode === 'register' && (
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase font-black tracking-widest text-slate-400 block">{t.fullname_label}</label>
+                  <input
+                    id="auth-reg-fullname"
+                    type="text"
+                    required
+                    value={fullname}
+                    onChange={(e) => setFullname(e.target.value)}
+                    className={`w-full text-base md:text-xs px-3.5 py-3 rounded-xl border bg-slate-50 dark:bg-[#0A0C10] border-transparent focus:border-[var(--primary-color, #38bdf8)] focus:bg-white dark:focus:bg-black text-slate-800 dark:text-white outline-none transition-all ${
+                      isRtl ? 'text-right' : 'text-left'
+                    }`}
+                  />
+                </div>
+              )}
+
+              {/* Email */}
+              <div className="space-y-1">
+                <label className="text-[10px] uppercase font-black tracking-widest text-slate-400 block">{t.email_label}</label>
+                <div className="relative">
+                  <div className={`absolute inset-y-0 ${isRtl ? 'left-3' : 'right-3'} flex items-center pointer-events-none text-slate-400`}>
+                    <Mail className="w-4 h-4" />
+                  </div>
+                  <input
+                    id="auth-email-input"
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className={`w-full text-base md:text-xs py-3 px-3.5 pr-10 rounded-xl border bg-slate-50 dark:bg-[#0A0C10] border-transparent focus:border-[var(--primary-color, #38bdf8)] focus:bg-white dark:focus:bg-black text-slate-850 dark:text-white outline-none transition-all ${
+                      isRtl ? 'text-right pr-3.5 pl-10' : 'text-left pr-10 pl-3.5'
+                    }`}
+                  />
+                </div>
+              </div>
+
+              {/* Password */}
+              {authMode !== 'forgot' && (
+                <div className="space-y-1 font-sans">
+                  <label className="text-[10px] uppercase font-black tracking-widest text-slate-400 block">{t.password_label}</label>
+                  <div className="relative font-sans">
+                    <div className={`absolute inset-y-0 ${isRtl ? 'left-3' : 'right-3'} flex items-center pointer-events-none text-slate-400`}>
+                      <Key className="w-4 h-4" />
+                    </div>
+                    <input
+                      id="auth-password-input"
+                      type={showPassword ? 'text' : 'password'}
+                      required
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="w-full text-base md:text-xs py-3 px-10 rounded-xl border bg-slate-50 dark:bg-[#0A0C10] border-transparent focus:border-[var(--primary-color, #38bdf8)] focus:bg-white dark:focus:bg-black text-slate-850 dark:text-white outline-none transition-all placeholder-slate-400 text-center"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className={`absolute inset-y-0 ${isRtl ? 'right-3' : 'left-3'} flex items-center text-slate-400 hover:text-[var(--primary-color)] transition-colors`}
+                      aria-label="Toggle password visibility"
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
 
           {/* Action button */}
           <button
             id="btn-auth-submit"
             type="submit"
-            className="w-full py-3.5 bg-[var(--primary-color)] hover:opacity-90 hover:shadow-[0_0_15px_rgba(var(--primary-color-rgb,56,189,248),0.3)] text-slate-950 font-black rounded-xl transition-all cursor-pointer text-xs uppercase"
+            disabled={isLoading}
+            className="w-full py-3.5 bg-red-600 hover:bg-red-700 text-white font-black rounded-xl transition-all cursor-pointer text-xs uppercase shadow-lg shadow-red-600/30 disabled:opacity-50 flex items-center justify-center gap-2"
           >
-            {authMode === 'login' ? t.login : authMode === 'register' ? t.register : (isRtl ? 'إرسال كلمة المرور 📩' : 'Submit Recovery 📩')}
+            {isLoading ? (
+              <span className="inline-block animate-pulse">{isRtl ? 'جاري المعالجة...' : 'Processing...'}</span>
+            ) : (
+              authMode === 'login' 
+                ? t.login 
+                : authMode === 'register' 
+                  ? t.register 
+                  : authMode === 'otp_verify'
+                    ? (isRtl ? 'تأكيد الكود وتأكيد الحساب 🔓' : 'Verify Code & Continue 🔓')
+                    : (isRtl ? 'إرسال كود الأمان 📩' : 'Send Recovery OTP 📩')
+            )}
           </button>
         </form>
 

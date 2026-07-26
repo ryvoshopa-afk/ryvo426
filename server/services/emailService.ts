@@ -187,7 +187,8 @@ export async function fetchEmailLogs(db?: any): Promise<EmailLogEntry[]> {
 }
 
 /**
- * Modern Dark Theme HTML Email Template with RYVO Logo Header
+ * Modern High-Contrast Luxury HTML Email Template with Red, White, and Black Visual Identity
+ * Visual Palette: Red (#DC2626 / #EF4444), White (#FFFFFF), Deep Black (#0B0F19 / #111827)
  */
 export function buildHtmlEmailTemplate(
   title: string,
@@ -207,9 +208,9 @@ export function buildHtmlEmailTemplate(
     <title>${title}</title>
     <style>
       body {
-        font-family: 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, Tahoma, Roboto, sans-serif;
-        background-color: #090d16;
-        color: #f1f5f9;
+        font-family: 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, Tahoma, Roboto, 'Helvetica Neue', sans-serif;
+        background-color: #0b0f19;
+        color: #f8fafc;
         margin: 0;
         padding: 24px 12px;
         direction: rtl;
@@ -222,37 +223,41 @@ export function buildHtmlEmailTemplate(
         border-radius: 20px;
         border: 1px solid #1f293d;
         overflow: hidden;
-        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6), 0 0 30px rgba(56, 189, 248, 0.08);
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.8), 0 0 25px rgba(220, 38, 38, 0.15);
       }
       .email-header {
-        background: linear-gradient(135deg, #0b101d 0%, #172033 100%);
+        background: linear-gradient(135deg, #18090b 0%, #0f172a 100%);
         padding: 36px 28px 28px;
         text-align: center;
-        border-bottom: 1px solid #1e293b;
+        border-bottom: 2px solid #dc2626;
         position: relative;
       }
       .logo-badge {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        width: 52px;
-        height: 52px;
+        width: 56px;
+        height: 56px;
         border-radius: 16px;
-        background: linear-gradient(135deg, #0284c7 0%, #6366f1 100%);
+        background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
         color: #ffffff;
-        font-size: 26px;
+        font-size: 28px;
         font-weight: 900;
         margin-bottom: 12px;
-        box-shadow: 0 0 25px rgba(56, 189, 248, 0.4);
+        box-shadow: 0 0 25px rgba(220, 38, 38, 0.6);
+        border: 1px solid #ef4444;
       }
       .brand-title {
-        font-size: 26px;
+        font-size: 28px;
         font-weight: 900;
-        letter-spacing: 3px;
-        color: #38bdf8;
+        letter-spacing: 4px;
+        color: #ffffff;
         text-transform: uppercase;
         margin: 0;
-        text-shadow: 0 0 20px rgba(56, 189, 248, 0.3);
+        text-shadow: 0 0 15px rgba(239, 68, 68, 0.4);
+      }
+      .brand-title span {
+        color: #ef4444;
       }
       .brand-slogan {
         margin: 6px 0 0;
@@ -265,14 +270,14 @@ export function buildHtmlEmailTemplate(
         padding: 36px 30px;
         line-height: 1.8;
         font-size: 15px;
-        color: #e2e8f0;
+        color: #f1f5f9;
       }
       .header-badge {
         display: inline-block;
         padding: 6px 16px;
-        background: rgba(56, 189, 248, 0.12);
-        color: #38bdf8;
-        border: 1px solid rgba(56, 189, 248, 0.3);
+        background: rgba(220, 38, 38, 0.12);
+        color: #ef4444;
+        border: 1px solid rgba(239, 68, 68, 0.35);
         border-radius: 20px;
         font-size: 12px;
         font-weight: 800;
@@ -281,22 +286,40 @@ export function buildHtmlEmailTemplate(
       .main-title {
         font-size: 22px;
         font-weight: 800;
-        color: #f8fafc;
+        color: #ffffff;
         margin: 0 0 16px;
       }
       .greeting {
         font-size: 16px;
         font-weight: 700;
-        color: #38bdf8;
+        color: #ef4444;
         margin-bottom: 16px;
       }
       .content-box {
-        background-color: #1e293b;
-        border: 1px solid #334155;
+        background-color: #181e2a;
+        border: 1px solid #283042;
         border-radius: 14px;
         padding: 20px;
         margin: 20px 0;
-        color: #e2e8f0;
+        color: #f1f5f9;
+      }
+      .otp-box {
+        background: linear-gradient(135deg, #1c0a0d 0%, #0f172a 100%);
+        border: 2px solid #dc2626;
+        border-radius: 16px;
+        padding: 22px;
+        text-align: center;
+        margin: 22px 0;
+        box-shadow: 0 0 20px rgba(220, 38, 38, 0.2);
+      }
+      .otp-code {
+        font-size: 34px;
+        font-weight: 900;
+        letter-spacing: 10px;
+        color: #ffffff;
+        font-family: 'Courier New', monospace;
+        margin: 10px 0;
+        text-shadow: 0 0 12px rgba(239, 68, 68, 0.8);
       }
       .cta-wrapper {
         text-align: center;
@@ -305,18 +328,18 @@ export function buildHtmlEmailTemplate(
       }
       .cta-button {
         display: inline-block;
-        padding: 14px 34px;
-        background: linear-gradient(135deg, #0284c7 0%, #4338ca 100%);
+        padding: 14px 36px;
+        background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
         color: #ffffff !important;
         text-decoration: none;
         border-radius: 12px;
         font-weight: 800;
         font-size: 15px;
-        box-shadow: 0 6px 20px rgba(2, 132, 199, 0.4);
-        transition: all 0.2s ease;
+        box-shadow: 0 8px 24px rgba(220, 38, 38, 0.45);
+        border: 1px solid #ef4444;
       }
       .email-footer {
-        background-color: #0b0f19;
+        background-color: #080b12;
         padding: 26px 24px;
         text-align: center;
         font-size: 12px;
@@ -327,9 +350,10 @@ export function buildHtmlEmailTemplate(
         margin-bottom: 12px;
       }
       .footer-links a {
-        color: #38bdf8;
+        color: #ef4444;
         text-decoration: none;
         margin: 0 8px;
+        font-weight: 600;
       }
     </style>
   </head>
@@ -340,8 +364,8 @@ export function buildHtmlEmailTemplate(
         <div style="display: flex; align-items: center; justify-content: center; gap: 12px;">
           <div class="logo-badge">R</div>
         </div>
-        <h1 class="brand-title">RYVO STORE</h1>
-        <p class="brand-slogan">المتجر الرسمي للمنتجات الفاخرة والرقمية</p>
+        <h1 class="brand-title">RYVO <span>STORE</span></h1>
+        <p class="brand-slogan">المتجر الرسمي للدراجات والمنتجات الفاخرة - ryvo.shop</p>
       </div>
 
       <!-- Main Body -->
@@ -362,15 +386,151 @@ export function buildHtmlEmailTemplate(
         <div class="footer-links">
           <a href="https://ryvo.shop">الموقع الرسمي</a> |
           <a href="https://ryvo.shop/support">الدعم الفني</a> |
-          <a href="mailto:${PRIMARY_ADMIN_EMAIL}">${PRIMARY_ADMIN_EMAIL}</a>
+          <a href="mailto:orders@ryvo.shop">orders@ryvo.shop</a>
         </div>
-        <p style="margin: 4px 0;">تم إرسال هذه الرسالة تلقائياً عبر نظام متجر RYVO المعتمد.</p>
-        <p style="margin: 4px 0;">© ${currentYear} RYVO Store. جميع الحقوق محفوظة.</p>
+        <p style="margin: 4px 0;">تم إرسال هذه الرسالة الموثقة تلقائياً من النطاق الرسمي لمتجر RYVO.</p>
+        <p style="margin: 4px 0;">© ${currentYear} RYVO Store (ryvo.shop). جميع الحقوق محفوظة.</p>
       </div>
     </div>
   </body>
   </html>
   `;
+}
+
+/**
+ * 6-Digit OTP Email Dispatcher
+ */
+export async function sendOtpVerificationEmail(
+  toEmail: string,
+  otpCode: string,
+  purpose: 'verification' | 'reset' | 'login' = 'verification',
+  db?: any,
+  getSettings?: () => any
+) {
+  const isReset = purpose === 'reset';
+  const isLogin = purpose === 'login';
+
+  const title = isReset 
+    ? 'رمز استعادة كلمة المرور 🔑' 
+    : isLogin 
+      ? 'رمز الأمان لتسجيل الدخول 🔓' 
+      : 'رمز تأكيد البريد الإلكتروني ✉️';
+
+  const badge = isReset ? 'استعادة الحساب 🔐' : isLogin ? 'تسجيل دخول آمن 🛡️' : 'تأكيد الحساب ✉️';
+
+  const contentHtml = `
+    <p>مرحباً بك،</p>
+    <p>${isReset 
+      ? 'لقد استلمنا طلباً لإعادة ضبط كلمة المرور الخاصة بحسابك في متجر RYVO.' 
+      : isLogin 
+        ? 'يرجى إدخال رمز الأمان التالي لإتمام عملية تسجيل الدخول إلى حسابك.' 
+        : 'يرجى إدخال رمز التأكيد السري التالي المكون من 6 أرقام لتفعيل حسابك رسمياً:'}</p>
+    
+    <div class="otp-box">
+      <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;">
+        رمز الأمان الخاص بك (OTP)
+      </div>
+      <div class="otp-code">${otpCode}</div>
+      <div style="font-size: 12px; color: #ef4444; font-weight: 700; margin-top: 6px;">
+        ⏰ ينتهي رمز الأمان خلال 10 دقائق من إرساله
+      </div>
+    </div>
+
+    <p style="font-size: 13px; color: #94a3b8; text-align: center;">
+      إذا لم تقم بطلب هذا الرمز بنفسك، يرجى إهمال هذه الرسالة ولن يتأثر حسابك إطلاقاً.
+    </p>
+  `;
+
+  return sendRealEmail({
+    to: toEmail.toLowerCase().trim(),
+    subject: `${title} - متجر RYVO الرسمي (${otpCode})`,
+    html: buildHtmlEmailTemplate(
+      title,
+      'عزيزي العميل،',
+      contentHtml,
+      undefined,
+      undefined,
+      badge
+    ),
+    triggerEvent: isReset ? 'password_reset' : 'email_verification',
+    db,
+    getSettings
+  });
+}
+
+/**
+ * Welcome Email Dispatcher upon successful verification
+ */
+export async function sendWelcomeEmail(
+  toEmail: string,
+  customerName: string,
+  db?: any,
+  getSettings?: () => any
+) {
+  const contentHtml = `
+    <p>أهلاً وسهلاً بك يا <strong>${customerName}</strong> في العائلة الرسمية لمتجر <strong>RYVO</strong>!</p>
+    <div class="content-box">
+      <div style="font-size: 16px; font-weight: 900; color: #ef4444; margin-bottom: 10px;">
+        🎉 هدية الانضمام الحصرية:
+      </div>
+      <p style="margin: 0; font-size: 14px;">
+        تمت إضافة <strong style="color: #ffffff; font-size: 16px;">100 نقطة ولاء مجانية</strong> فوراً إلى حسابك! يمكنك استخدام نقاطك للحصول على خصومات حصرية عند شراء الدراجات أو الإكسسوارات الفاخرة.
+      </p>
+    </div>
+    <p>نعدك بتقديم أفضل تجربة تسوق مع شحن سريع وضمان ذهبي على كافة المنتجات.</p>
+  `;
+
+  return sendRealEmail({
+    to: toEmail.toLowerCase().trim(),
+    subject: `مرحباً بك في متجر RYVO الرسمي! 🎉 تم إضافة 100 نقطة مجانية`,
+    html: buildHtmlEmailTemplate(
+      `أهلاً بك في متجر RYVO`,
+      `مرحباً ${customerName}،`,
+      contentHtml,
+      `ابدأ التسوق الآن 🛍️`,
+      `https://ryvo.shop`,
+      `مرحباً بك 🎉`
+    ),
+    triggerEvent: 'account_creation',
+    db,
+    getSettings
+  });
+}
+
+/**
+ * Customer Support Confirmation Email Dispatcher
+ */
+export async function sendCustomerSupportConfirmation(
+  toEmail: string,
+  customerName: string,
+  messagePreview: string,
+  db?: any,
+  getSettings?: () => any
+) {
+  const contentHtml = `
+    <p>تم استلام استفسارك بنجاح عبر نموذج التواصل بموقع <strong>RYVO Store</strong> الرسمي.</p>
+    <div class="content-box">
+      <div style="font-size:14px; font-weight:800; color:#ef4444; margin-bottom:8px;">ملخص استفسارك الوارد:</div>
+      <p style="margin:0; font-style:italic; color:#e2e8f0;">"${messagePreview}"</p>
+    </div>
+    <p>يقوم فريق خدمة العملاء والدعم الفني بمراجعة طلبك وسنقوم بالرد عليك على هذا البريد في أقرب وقت ممكن (خلال أقل من 24 ساعة).</p>
+  `;
+
+  return sendRealEmail({
+    to: toEmail.toLowerCase().trim(),
+    subject: `تأكيد استلام طلب الدعم الفني - متجر RYVO 💬`,
+    html: buildHtmlEmailTemplate(
+      `تم استلام رسالتك بنجاح 💬`,
+      `أهلاً ${customerName || 'عزيزي العميل'}،`,
+      contentHtml,
+      `تصفح مركز الدعم`,
+      `https://ryvo.shop/support`,
+      `خدمة العملاء 💬`
+    ),
+    triggerEvent: 'support_message',
+    db,
+    getSettings
+  });
 }
 
 /**
@@ -432,25 +592,25 @@ export async function sendCustomerOrderStatusEmail(
   };
 
   const itemsHtml = (order.items || []).map((it: any) => `
-    <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid #334155; font-size:13px;">
+    <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid #283042; font-size:13px;">
       <span>• ${it.name} [x${it.quantity}]</span>
-      <span style="font-weight:700; color:#38bdf8;">${it.price * it.quantity} ر.س</span>
+      <span style="font-weight:700; color:#ef4444;">${it.price * it.quantity} ر.س</span>
     </div>
   `).join('');
 
   const bodyContent = `
     <p>${cfg.text}</p>
     <div class="content-box">
-      <div style="font-size:14px; font-weight:800; color:#38bdf8; margin-bottom:10px;">ملخص تفاصيل الطلب:</div>
+      <div style="font-size:14px; font-weight:800; color:#ef4444; margin-bottom:10px;">ملخص تفاصيل الطلب:</div>
       <div style="margin-bottom:8px;"><strong>رقم الطلب:</strong> #${order.id}</div>
       <div style="margin-bottom:8px;"><strong>تاريخ الطلب:</strong> ${order.date || new Date().toLocaleDateString('ar-SA')}</div>
-      <div style="margin-bottom:8px;"><strong>إجمالي المبلغ:</strong> <span style="color:#38bdf8; font-weight:900;">${order.total} ر.س</span></div>
+      <div style="margin-bottom:8px;"><strong>إجمالي المبلغ:</strong> <span style="color:#ef4444; font-weight:900;">${order.total} ر.س</span></div>
       <div style="margin-bottom:8px;"><strong>طريقة الدفع:</strong> ${order.payment_method === 'cod' ? 'الدفع عند الاستلام' : (order.payment_method || 'بطاقة إلكترونية')}</div>
       ${order.address ? `<div style="margin-bottom:8px;"><strong>عنوان التوصيل:</strong> ${order.address} (${order.phone || ''})</div>` : ''}
       ${trackingNumber || order.tracking_number ? `
-        <div style="margin-top:14px; background:#0f172a; padding:12px; border-radius:10px; border:1px solid #0284c7; text-align:center;">
+        <div style="margin-top:14px; background:#0f172a; padding:12px; border-radius:10px; border:1px solid #dc2626; text-align:center;">
           <span style="color:#94a3b8; font-size:12px; display:block;">📦 رقم تتبع الشحنة:</span>
-          <strong style="color:#38bdf8; font-size:18px; font-family:monospace;">${trackingNumber || order.tracking_number}</strong>
+          <strong style="color:#ef4444; font-size:18px; font-family:monospace;">${trackingNumber || order.tracking_number}</strong>
         </div>
       ` : ''}
       <div style="margin-top:14px; font-size:13px; color:#cbd5e1;">
